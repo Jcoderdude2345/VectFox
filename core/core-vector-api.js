@@ -35,7 +35,7 @@ import { oai_settings } from '../../../../openai.js';
 import { isWebLlmSupported } from '../../../shared.js';
 import { getWebLlmProvider } from '../providers/webllm.js';
 import { getBackend, getBackendForCollection, invalidateBackendHealth, recordQuery, recordInsert, recordDelete, recordError } from '../backends/backend-manager.js';
-import { parseRegistryKey, resolveBackendForCollection } from './collection-ids.js';
+import { parseRegistryKey, resolveBackendForCollection, getRegistryBackend } from './collection-ids.js';
 import {
     getProviderConfig,
     getModelField,
@@ -791,7 +791,7 @@ async function _fetchSavedHashesWithMetadata(collectionId, settings) {
             method: 'POST',
             headers: getRequestHeaders(),
             body: JSON.stringify({
-                backend: backendName === 'standard' ? 'vectra' : backendName,
+                backend: getRegistryBackend(backendName),
                 collectionId: collectionId,
                 source: settings.source || 'transformers',
                 model: getModelFromSettings(settings),

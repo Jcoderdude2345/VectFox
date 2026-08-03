@@ -33,7 +33,7 @@ import {
     registerCollection,
     getCollectionRegistry,
 } from './collection-loader.js';
-import { COLLECTION_PREFIXES, buildRegistryKey, parseCollectionId, normalizeBackendForId, remapCollectionIdToBackend } from './collection-ids.js';
+import { COLLECTION_PREFIXES, buildRegistryKey, parseCollectionId, normalizeBackendForId, remapCollectionIdToBackend, getRegistryBackend } from './collection-ids.js';
 import { getModelFromSettings } from './providers.js';
 import { encodeSparseVector } from './sparse-vector-encoder.js';
 import { progressTracker } from '../ui/progress-tracker.js';
@@ -82,7 +82,7 @@ async function fetchChunksWithVectors(collectionId, settings) {
         method: 'POST',
         headers: getRequestHeaders(),
         body: JSON.stringify({
-            backend: backendName === 'standard' ? 'vectra' : backendName,
+            backend: getRegistryBackend(backendName),
             collectionId: collectionId,
             source: settings.source || 'transformers',
             model: getModelFromSettings(settings),
@@ -570,7 +570,7 @@ async function insertChunksWithVectors(collectionId, chunks, settings, onBatchPr
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({
-                    backend: backendName === 'standard' ? 'vectra' : backendName,
+                    backend: getRegistryBackend(backendName),
                     collectionId,
                     source: settings.source || 'transformers',
                     model,

@@ -28,6 +28,10 @@ import { getModelConfigErrorMessage } from './model-http-errors.js';
 import { getRequestHeaders } from '../../../../../script.js';
 import { log } from './log.js';
 
+// Same two-liner bm25-scorer.js and corpus-stats.js already use locally.
+const _now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+const _ms = (start) => Math.round(_now() - start);
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -48,7 +52,7 @@ import { log } from './log.js';
 export async function retrieveEventsWithAgent(params) {
     const { settings } = params;
     const agenticDebug = log.domainEnabled('agent');
-    const tAgentStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const tAgentStart = _now();
 
     // STAGE 1 — existing pre-search runs unconditionally.
     const preSearch = await retrieveEvents(params);
@@ -112,7 +116,7 @@ export async function retrieveEventsWithAgent(params) {
 
     const timeoutMs = settings.agentic_retrieval_timeout_ms || 30000;
     let plan;
-    const tLlmStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const tLlmStart = _now();
     try {
         plan = await _callPlanner({
             systemPrompt: getAgenticPlannerPrompt(settings?.cjk_tokenizer_mode),
@@ -121,7 +125,7 @@ export async function retrieveEventsWithAgent(params) {
             timeoutMs,
         });
     } catch (err) {
-        const tLlmMs = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tLlmStart));
+        const tLlmMs = _ms(tLlmStart);
         // A retired/unknown Agent Mode model would otherwise silently degrade to
         // pre-search forever. Warn the user (once) so they know to fix it; we still
         // fall back to pre-search below so retrieval keeps working in the meantime.
@@ -143,7 +147,7 @@ export async function retrieveEventsWithAgent(params) {
         }
         return preSearch;
     }
-    const tLlmMs = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tLlmStart));
+    const tLlmMs = _ms(tLlmStart);
 
     if (agenticDebug) {
         // Surface real token usage from the API response (when the provider
@@ -195,7 +199,7 @@ export async function retrieveEventsWithAgent(params) {
         }
     }
 
-    const tFanoutStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const tFanoutStart = _now();
     const fanoutPromises = [];
     for (const colId of liveCollectionIds) {
         for (const queryText of validatedQueries) {
@@ -214,7 +218,7 @@ export async function retrieveEventsWithAgent(params) {
         }
     }
     const fanoutResults = await Promise.all(fanoutPromises);
-    const tFanoutMs = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tFanoutStart));
+    const tFanoutMs = _ms(tFanoutStart);
 
     const agenticHits = fanoutResults.flatMap(r => r.hits);
 
@@ -248,7 +252,7 @@ export async function retrieveEventsWithAgent(params) {
         skipLiveQuery: true,
     });
 
-    const tTotalMs = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tAgentStart));
+    const tTotalMs = _ms(tAgentStart);
     if (agenticDebug) {
         log.domain('agent', 'lifecycle', `[VectFox-Agentic] Final merged candidates: ${(preSearch.events || []).length} pre-search + ${agenticHits.length} agentic = ${mergedAdditional.length} total → ${final.events?.length || 0} after rerank/dedup/trim`);
         log.domain('agent', 'lifecycle', `[VectFox-Agentic] Total wall-clock for agent overhead: ${tTotalMs}ms (LLM=${tLlmMs}ms, fanout=${tFanoutMs}ms)`);
