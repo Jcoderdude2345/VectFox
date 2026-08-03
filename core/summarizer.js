@@ -19,7 +19,7 @@
 import { getOpenRouterApiKey, getCustomApiKey } from './api-keys.js';
 import { getDefaultSummarizePrompt } from './prompts-i18n.js';
 import { getModelConfigErrorMessage } from './model-http-errors.js';
-import { getRequestHeaders } from '../../../../../script.js';
+import { callChatCompletion, extractReply, errorBodyText } from './llm-transport.js';
 import { log } from './log.js';
 
 /**
@@ -182,29 +182,8 @@ function _estimateSummaryTokenBudget(text) {
     return CJK_RATIO > 0.1 ? CJK_MAX_TOKENS : DEFAULT_MAX_TOKENS;
 }
 
-/**
- * Build a standard OpenAI-compatible chat completions request body.
- * @param {string} prompt
- * @param {string} model
- * @returns {object}
- */
-function _buildBody(prompt, model, maxTokens = DEFAULT_MAX_TOKENS) {
-    return {
-        model: model,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: maxTokens,
-        temperature: 0.3,
-    };
-}
-
-/**
- * Extract the assistant reply text from an OpenAI-compatible response.
- * @param {object} data
- * @returns {string|null}
- */
-function _extractReply(data) {
-    return data?.choices?.[0]?.message?.content?.trim() || null;
-}
+/** Summaries run cooler than the default but not deterministic. */
+const SUMMARIZE_TEMPERATURE = 0.3;
 
 // _getOpenRouterApiKey was inlined here pre-H-1; now an alias for the
 // canonical single-key helper. ONE OpenRouter key shared across
@@ -229,21 +208,20 @@ async function _callOpenRouter(prompt, model, settings, originalLength, maxToken
         );
     }
 
-    const response = await fetch('/api/backends/chat-completions/generate', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            chat_completion_source: 'openrouter',
-            ..._buildBody(prompt, model, maxTokens),
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
+    const result = await callChatCompletion({
+        provider: 'openrouter',
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens,
+        temperature: SUMMARIZE_TEMPERATURE,
+        timeoutMs,
     });
 
-    if (!response.ok) {
-        const errText = await response.text().catch(() => response.statusText);
-        if (response.status === 401 || response.status === 403) {
+    if (!result.ok) {
+        const { status, errText } = result;
+        if (status === 401 || status === 403) {
             throw new SummarizationFatalError(
-                `OpenRouter authentication failed (${response.status}). Check your API key.`,
+                `OpenRouter authentication failed (${status}). Check your API key.`,
                 'openrouter',
                 'invalid_api_key'
             );
@@ -252,25 +230,23 @@ async function _callOpenRouter(prompt, model, settings, originalLength, maxToken
             contextLabel: 'Summarizer',
             provider: 'OpenRouter',
             model,
-            status: response.status,
+            status,
             responseText: errText,
         });
         if (modelConfigError) {
             throw new SummarizationFatalError(modelConfigError, 'openrouter', 'invalid_model_config');
         }
-        throw new Error(`OpenRouter HTTP ${response.status}: ${errText}`);
+        throw new Error(`OpenRouter HTTP ${status}: ${errText}`);
     }
 
-    const data = await response.json();
-    const summary = _extractReply(data);
+    const summary = extractReply(result.data);
     if (!summary) {
-        const bodyText = data?.error ? JSON.stringify(data.error) : JSON.stringify(data || {});
         const modelConfigError = getModelConfigErrorMessage({
             contextLabel: 'Summarizer',
             provider: 'OpenRouter',
             model,
-            status: response.status,
-            responseText: bodyText,
+            status: result.status,
+            responseText: errorBodyText(result.data),
             enforceStatusGate: false,
         });
         if (modelConfigError) throw new SummarizationFatalError(modelConfigError, 'openrouter', 'invalid_model_config');
@@ -331,24 +307,21 @@ async function _callVLLM(prompt, model, settings, maxTokens = DEFAULT_MAX_TOKENS
         );
     }
 
-    const body = {
-        ..._buildBody(prompt, model, maxTokens),
-        chat_completion_source: 'custom',
-        custom_url: baseUrl,
-    };
-
-    const response = await fetch('/api/backends/chat-completions/generate', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
+    const result = await callChatCompletion({
+        provider: 'vllm',
+        model,
+        vllmUrl: baseUrl,
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens,
+        temperature: SUMMARIZE_TEMPERATURE,
+        timeoutMs,
     });
 
-    if (!response.ok) {
-        const errText = await response.text().catch(() => response.statusText);
-        if (response.status === 401 || response.status === 403) {
+    if (!result.ok) {
+        const { status, errText } = result;
+        if (status === 401 || status === 403) {
             throw new SummarizationFatalError(
-                `vLLM authentication failed (${response.status}). Check your API key in Summarize Before Store settings.`,
+                `vLLM authentication failed (${status}). Check your API key in Summarize Before Store settings.`,
                 'vllm',
                 'invalid_api_key'
             );
@@ -357,25 +330,23 @@ async function _callVLLM(prompt, model, settings, maxTokens = DEFAULT_MAX_TOKENS
             contextLabel: 'Summarizer',
             provider: 'vLLM',
             model,
-            status: response.status,
+            status,
             responseText: errText,
         });
         if (modelConfigError) {
             throw new SummarizationFatalError(modelConfigError, 'vllm', 'invalid_model_config');
         }
-        throw new Error(`vLLM HTTP ${response.status}: ${errText}`);
+        throw new Error(`vLLM HTTP ${status}: ${errText}`);
     }
 
-    const data = await response.json();
-    const summary = _extractReply(data);
+    const summary = extractReply(result.data);
     if (!summary) {
-        const bodyText = data?.error ? JSON.stringify(data.error) : JSON.stringify(data || {});
         const modelConfigError = getModelConfigErrorMessage({
             contextLabel: 'Summarizer',
             provider: 'vLLM',
             model,
-            status: response.status,
-            responseText: bodyText,
+            status: result.status,
+            responseText: errorBodyText(result.data),
             enforceStatusGate: false,
         });
         if (modelConfigError) throw new SummarizationFatalError(modelConfigError, 'vllm', 'invalid_model_config');
