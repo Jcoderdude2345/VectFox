@@ -12,7 +12,7 @@
  */
 
 import { getOpenRouterApiKey, getCustomApiKey } from './api-keys.js';
-import { getRequestHeaders } from '../../../../../script.js';
+import { callChatCompletion, extractReply, errorBodyText } from './llm-transport.js';
 import { getModelConfigErrorMessage } from './model-http-errors.js';
 import {
     EVENT_TYPES,
@@ -52,38 +52,14 @@ const _getOpenRouterApiKey = getOpenRouterApiKey;
 // Response body builder
 // ---------------------------------------------------------------------------
 
-/**
- * Build an OpenAI-compatible chat completions request body.
- *
- * Note: EventBase prompt requires a top-level JSON array. Do not force
- * response_format=json_object here, or providers will coerce output to an
- * object and suppress valid array responses.
- * @param {string} prompt
- * @param {string} model
- * @param {number} maxTokens
- * @param {number} temperature
- * @returns {object}
- */
-function _buildBody(prompt, model, maxTokens, temperature) {
-    return {
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: maxTokens,
-        temperature,
-    };
-}
-
 // ---------------------------------------------------------------------------
 // Reply extraction
 // ---------------------------------------------------------------------------
-
-/**
- * @param {object} data
- * @returns {string|null}
- */
-function _extractReply(data) {
-    return data?.choices?.[0]?.message?.content?.trim() || null;
-}
+//
+// Note: the EventBase prompt requires a top-level JSON array, so no
+// `responseFormat` is passed to callChatCompletion — forcing
+// response_format=json_object makes providers coerce output to an object and
+// suppress valid array responses.
 
 /**
  * OpenRouter (and ST's proxy) sometimes returns HTTP 200 with an error in the
@@ -97,7 +73,7 @@ function _extractReply(data) {
  * @param {{ provider: string, model: string, status: number, data: any, settings: object }} ctx
  */
 function _classifyEmptyReplyBody({ provider, model, status, data, settings }) {
-    const bodyText = data?.error ? JSON.stringify(data.error) : JSON.stringify(data || {});
+    const bodyText = errorBodyText(data);
     const modelConfigError = getModelConfigErrorMessage({
         contextLabel: 'EventBase',
         provider,
@@ -357,21 +333,20 @@ async function _callOpenRouter(prompt, settings, windowIndex) {
     const temperature = settings.eventbase_temperature ?? DEFAULT_TEMPERATURE;
     const timeoutMs = settings.eventbase_timeout_ms || DEFAULT_TIMEOUT_MS;
 
-    const response = await fetch('/api/backends/chat-completions/generate', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            chat_completion_source: 'openrouter',
-            ..._buildBody(prompt, model, maxTokens, temperature),
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
+    const result = await callChatCompletion({
+        provider: 'openrouter',
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens,
+        temperature,
+        timeoutMs,
     });
 
-    if (!response.ok) {
-        const errText = await response.text().catch(() => response.statusText);
-        if (response.status === 401 || response.status === 403) {
+    if (!result.ok) {
+        const { status, errText } = result;
+        if (status === 401 || status === 403) {
             throw new EventBaseFatalError(
-                `EventBase: OpenRouter authentication failed (${response.status}). Check your API key.`,
+                `EventBase: OpenRouter authentication failed (${status}). Check your API key.`,
                 'invalid_api_key',
             );
         }
@@ -379,22 +354,21 @@ async function _callOpenRouter(prompt, settings, windowIndex) {
             contextLabel: 'EventBase',
             provider: 'OpenRouter',
             model,
-            status: response.status,
+            status,
             responseText: errText,
         });
         if (modelConfigError) {
             throw new EventBaseFatalError(modelConfigError, 'invalid_model_config');
         }
         throw new EventBaseExtractionError(
-            `EventBase: OpenRouter HTTP ${response.status}: ${errText}`,
+            `EventBase: OpenRouter HTTP ${status}: ${errText}`,
             windowIndex,
         );
     }
 
-    const data = await response.json();
-    const reply = _extractReply(data);
+    const reply = extractReply(result.data);
     if (!reply) {
-        _classifyEmptyReplyBody({ provider: 'OpenRouter', model, status: response.status, data, settings });
+        _classifyEmptyReplyBody({ provider: 'OpenRouter', model, status: result.status, data: result.data, settings });
         throw new EventBaseExtractionError('EventBase: OpenRouter returned empty response', windowIndex);
     }
     return reply;
@@ -432,24 +406,21 @@ async function _callVLLM(prompt, settings, windowIndex) {
     const temperature = settings.eventbase_temperature ?? DEFAULT_TEMPERATURE;
     const timeoutMs = settings.eventbase_timeout_ms || DEFAULT_TIMEOUT_MS;
 
-    const body = {
-        ..._buildBody(prompt, model, maxTokens, temperature),
-        chat_completion_source: 'custom',
-        custom_url: baseUrl,
-    };
-
-    const response = await fetch('/api/backends/chat-completions/generate', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
+    const result = await callChatCompletion({
+        provider: 'vllm',
+        model,
+        vllmUrl: baseUrl,
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens,
+        temperature,
+        timeoutMs,
     });
 
-    if (!response.ok) {
-        const errText = await response.text().catch(() => response.statusText);
-        if (response.status === 401 || response.status === 403) {
+    if (!result.ok) {
+        const { status, errText } = result;
+        if (status === 401 || status === 403) {
             throw new EventBaseFatalError(
-                `EventBase: vLLM authentication failed (${response.status}). Check your API key in Core → LLM Summarization settings.`,
+                `EventBase: vLLM authentication failed (${status}). Check your API key in Core → LLM Summarization settings.`,
                 'invalid_api_key',
             );
         }
@@ -457,22 +428,21 @@ async function _callVLLM(prompt, settings, windowIndex) {
             contextLabel: 'EventBase',
             provider: 'vLLM',
             model,
-            status: response.status,
+            status,
             responseText: errText,
         });
         if (modelConfigError) {
             throw new EventBaseFatalError(modelConfigError, 'invalid_model_config');
         }
         throw new EventBaseExtractionError(
-            `EventBase: vLLM HTTP ${response.status}: ${errText}`,
+            `EventBase: vLLM HTTP ${status}: ${errText}`,
             windowIndex,
         );
     }
 
-    const data = await response.json();
-    const reply = _extractReply(data);
+    const reply = extractReply(result.data);
     if (!reply) {
-        _classifyEmptyReplyBody({ provider: 'vLLM', model, status: response.status, data, settings });
+        _classifyEmptyReplyBody({ provider: 'vLLM', model, status: result.status, data: result.data, settings });
         throw new EventBaseExtractionError('EventBase: vLLM returned empty response', windowIndex);
     }
     return reply;

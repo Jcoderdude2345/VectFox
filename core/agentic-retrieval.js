@@ -25,8 +25,12 @@ import { queryCollection } from './core-vector-api.js';
 import { buildPlannerUserMessage, getAgenticPlannerPrompt } from './prompts-i18n.js';
 import { getOpenRouterApiKey, getCustomApiKey } from './api-keys.js';
 import { getModelConfigErrorMessage } from './model-http-errors.js';
-import { getRequestHeaders } from '../../../../../script.js';
+import { callChatCompletion, errorBodyText } from './llm-transport.js';
 import { log } from './log.js';
+
+// Same two-liner bm25-scorer.js and corpus-stats.js already use locally.
+const _now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+const _ms = (start) => Math.round(_now() - start);
 
 // ============================================================================
 // Public API
@@ -48,7 +52,7 @@ import { log } from './log.js';
 export async function retrieveEventsWithAgent(params) {
     const { settings } = params;
     const agenticDebug = log.domainEnabled('agent');
-    const tAgentStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const tAgentStart = _now();
 
     // STAGE 1 — existing pre-search runs unconditionally.
     const preSearch = await retrieveEvents(params);
@@ -112,7 +116,7 @@ export async function retrieveEventsWithAgent(params) {
 
     const timeoutMs = settings.agentic_retrieval_timeout_ms || 30000;
     let plan;
-    const tLlmStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const tLlmStart = _now();
     try {
         plan = await _callPlanner({
             systemPrompt: getAgenticPlannerPrompt(settings?.cjk_tokenizer_mode),
@@ -121,7 +125,7 @@ export async function retrieveEventsWithAgent(params) {
             timeoutMs,
         });
     } catch (err) {
-        const tLlmMs = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tLlmStart));
+        const tLlmMs = _ms(tLlmStart);
         // A retired/unknown Agent Mode model would otherwise silently degrade to
         // pre-search forever. Warn the user (once) so they know to fix it; we still
         // fall back to pre-search below so retrieval keeps working in the meantime.
@@ -143,7 +147,7 @@ export async function retrieveEventsWithAgent(params) {
         }
         return preSearch;
     }
-    const tLlmMs = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tLlmStart));
+    const tLlmMs = _ms(tLlmStart);
 
     if (agenticDebug) {
         // Surface real token usage from the API response (when the provider
@@ -195,7 +199,7 @@ export async function retrieveEventsWithAgent(params) {
         }
     }
 
-    const tFanoutStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const tFanoutStart = _now();
     const fanoutPromises = [];
     for (const colId of liveCollectionIds) {
         for (const queryText of validatedQueries) {
@@ -214,7 +218,7 @@ export async function retrieveEventsWithAgent(params) {
         }
     }
     const fanoutResults = await Promise.all(fanoutPromises);
-    const tFanoutMs = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tFanoutStart));
+    const tFanoutMs = _ms(tFanoutStart);
 
     const agenticHits = fanoutResults.flatMap(r => r.hits);
 
@@ -248,7 +252,7 @@ export async function retrieveEventsWithAgent(params) {
         skipLiveQuery: true,
     });
 
-    const tTotalMs = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tAgentStart));
+    const tTotalMs = _ms(tAgentStart);
     if (agenticDebug) {
         log.domain('agent', 'lifecycle', `[VectFox-Agentic] Final merged candidates: ${(preSearch.events || []).length} pre-search + ${agenticHits.length} agentic = ${mergedAdditional.length} total → ${final.events?.length || 0} after rerank/dedup/trim`);
         log.domain('agent', 'lifecycle', `[VectFox-Agentic] Total wall-clock for agent overhead: ${tTotalMs}ms (LLM=${tLlmMs}ms, fanout=${tFanoutMs}ms)`);
@@ -327,53 +331,34 @@ export function _resolveAgenticLLMConfig(settings = {}) {
  * Throws on network/auth failure, empty response, or unparseable JSON.
  */
 async function _callPlanner({ systemPrompt, userMessage, llmCfg, timeoutMs }) {
-    const body = {
+    // llmCfg.apiKey is the MASKED presence indicator, never sent over the wire —
+    // ST's proxy reads the real key server-side from SECRET_KEYS.OPENROUTER or
+    // SECRET_KEYS.CUSTOM. See summarizer._callOpenRouter for the full rationale.
+    //
+    // Note there is deliberately NO 401/403 branch below: an auth failure falls
+    // through to the generic error and the caller degrades to pre-search, unlike
+    // the summarizer/EventBase/Auto-Reformat paths which treat it as fatal.
+    const result = await callChatCompletion({
+        provider: llmCfg.provider,
         model: llmCfg.model,
+        vllmUrl: llmCfg.vllmUrl,
         messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage },
         ],
-        max_tokens: 2000,
+        maxTokens: 2000,
         temperature: 0.2,
-        response_format: { type: 'json_object' },
-    };
-
-    let endpoint, headers, requestBody;
-    if (llmCfg.provider === 'openrouter') {
-        // Route through ST's chat-completions proxy. llmCfg.apiKey here is the
-        // MASKED placeholder (presence indicator only); the real key is read
-        // server-side via readSecret(SECRET_KEYS.OPENROUTER). See
-        // summarizer._callOpenRouter for the full rationale.
-        endpoint = '/api/backends/chat-completions/generate';
-        headers = getRequestHeaders();
-        requestBody = { chat_completion_source: 'openrouter', ...body };
-    } else if (llmCfg.provider === 'vllm') {
-        // Route through ST's chat-completions proxy with `chat_completion_source:
-        // 'custom'`. ST reads the real key server-side from SECRET_KEYS.CUSTOM
-        // and forwards to llmCfg.vllmUrl. llmCfg.apiKey here is the MASKED
-        // presence value — never sent over the wire. Same pattern as the
-        // openrouter branch above.
-        endpoint = '/api/backends/chat-completions/generate';
-        headers = getRequestHeaders();
-        requestBody = { chat_completion_source: 'custom', custom_url: llmCfg.vllmUrl, ...body };
-    } else {
-        throw new Error(`Unknown provider: ${llmCfg.provider}`);
-    }
-
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(timeoutMs),
+        responseFormat: { type: 'json_object' },
+        timeoutMs,
     });
 
-    if (!response.ok) {
-        const errText = await response.text().catch(() => response.statusText);
+    if (!result.ok) {
+        const { status, errText } = result;
         const modelConfigError = getModelConfigErrorMessage({
             contextLabel: 'Agent Mode',
             provider: llmCfg.provider,
             model: llmCfg.model,
-            status: response.status,
+            status,
             responseText: errText,
         });
         if (modelConfigError) {
@@ -381,22 +366,25 @@ async function _callPlanner({ systemPrompt, userMessage, llmCfg, timeoutMs }) {
             err.code = 'invalid_model_config';
             throw err;
         }
-        throw new Error(`HTTP ${response.status}: ${String(errText).slice(0, 200)}`);
+        throw new Error(`HTTP ${status}: ${String(errText).slice(0, 200)}`);
     }
 
-    const data = await response.json();
+    const data = result.data;
+    // Raw access rather than extractReply(): that helper trims and nulls a
+    // blank reply, which would reroute a whitespace-only planner response from
+    // the "not valid JSON" error to the "empty content" one. Same outcome for
+    // the caller (fall back to pre-search), but the log line would change.
     const content = data?.choices?.[0]?.message?.content;
     if (!content) {
         // OpenRouter via ST's proxy can return HTTP 200 with an error body (e.g.
         // {"message":"Not Found"} for a retired model) instead of a 4xx. Surface that
         // as a model-config error; a genuinely empty 200 stays the generic error below.
-        const bodyText = data?.error ? JSON.stringify(data.error) : JSON.stringify(data || {});
         const modelConfigError = getModelConfigErrorMessage({
             contextLabel: 'Agent Mode',
             provider: llmCfg.provider,
             model: llmCfg.model,
-            status: response.status,
-            responseText: bodyText,
+            status: result.status,
+            responseText: errorBodyText(data),
             enforceStatusGate: false,
         });
         if (modelConfigError) {

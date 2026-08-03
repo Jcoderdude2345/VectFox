@@ -85,6 +85,10 @@ const SUMMARY_BALANCED_HEADER_SIZE = 5000;
 
 const CJK_CHAR_RE = /[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF\u3040-\u309F\u30A0-\u30FF]/;
 
+// Structural markup tags whose content is purely non-CJK ([User], [OOC], …).
+// Brackets holding CJK (e.g. [勇者之劍]) are preserved for extractBracketTerms.
+const NON_CJK_BRACKET_RE = /\[[^\]\u4E00-\u9FFF\u3040-\u30FF\u3400-\u4DBF\uF900-\uFAFF]{1,30}\]/g;
+
 // In Japanese mode, allow a small set of high-signal 1-char tokens (mostly RPG terms)
 // plus frequency-based survival to avoid losing recurring key concepts.
 // In Japanese mode, allow a small set of high-signal 1-char tokens 
@@ -359,11 +363,10 @@ function extractBracketTerms(text) {
     // 「」 and 『』 are dialogue SPEECH QUOTES — intentionally excluded.
     const bracketRe = /(?:\u3010([^\u3011\n]{2,20})\u3011|\[([^\]\n]{2,20})\])/g;
     let m;
-    const cjkRe = /[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\uF900-\uFAFF]/;
     while ((m = bracketRe.exec(text)) !== null) {
         const inner = (m[1] ?? m[2]).trim();
         // Only include if the term contains at least one CJK character
-        if (cjkRe.test(inner)) {
+        if (CJK_CHAR_RE.test(inner)) {
             results.push(inner);
         }
     }
@@ -379,7 +382,7 @@ export function extractTextKeywords(text, options = {}) {
     // Strip structural markup tags: [User], [Character], [OOC], [location], [tag: content], etc.
     // Only strips brackets whose content is purely non-CJK (ASCII labels/formatting markers).
     // Brackets containing CJK characters (e.g. [勇者之劍]) are preserved for extractBracketTerms.
-    text = text.replace(/\[[^\]\u4E00-\u9FFF\u3040-\u30FF\u3400-\u4DBF\uF900-\uFAFF]{1,30}\]/g, ' ').replace(/\s+/g, ' ').trim();
+    text = text.replace(NON_CJK_BRACKET_RE, ' ').replace(/\s+/g, ' ').trim();
 
     const level = options.level || DEFAULT_EXTRACTION_LEVEL;
     const baseWeight = options.baseWeight || DEFAULT_BASE_WEIGHT;
@@ -591,7 +594,7 @@ export function extractBM25Keywords(text, options = {}) {
     // Strip structural markup tags: [User], [Character], [OOC], [location], [tag: content], etc.
     // Only strips brackets whose content is purely non-CJK (ASCII labels/formatting markers).
     // Brackets containing CJK characters (e.g. [勇者之劍]) are preserved for extractBracketTerms.
-    text = text.replace(/\[[^\]\u4E00-\u9FFF\u3040-\u30FF\u3400-\u4DBF\uF900-\uFAFF]{1,30}\]/g, ' ').replace(/\s+/g, ' ').trim();
+    text = text.replace(NON_CJK_BRACKET_RE, ' ').replace(/\s+/g, ' ').trim();
 
     // Get extraction level config
     const level = options.level || DEFAULT_EXTRACTION_LEVEL;

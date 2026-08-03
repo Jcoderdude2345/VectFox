@@ -21,7 +21,7 @@
  */
 
 import { getOpenRouterApiKey, getCustomApiKey } from './api-keys.js';
-import { getRequestHeaders } from '../../../../../script.js';
+import { callChatCompletion, extractReply, errorBodyText } from './llm-transport.js';
 import { getModelConfigErrorMessage } from './model-http-errors.js';
 import { chunkText } from './chunking.js';
 import AsyncUtils from '../utils/async-utils.js';
@@ -100,41 +100,35 @@ async function _callOpenRouter(prompt, settings, batchIndex) {
     const temperature = settings.reformat_temperature ?? DEFAULT_TEMPERATURE;
     const timeoutMs = settings.reformat_timeout_ms || DEFAULT_TIMEOUT_MS;
 
-    const response = await fetch('/api/backends/chat-completions/generate', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            chat_completion_source: 'openrouter',
-            model,
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: maxTokens,
-            temperature,
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
+    const result = await callChatCompletion({
+        provider: 'openrouter',
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens,
+        temperature,
+        timeoutMs,
     });
 
-    if (!response.ok) {
-        const errText = await response.text().catch(() => response.statusText);
-        if (response.status === 401 || response.status === 403) {
+    if (!result.ok) {
+        const { status, errText } = result;
+        if (status === 401 || status === 403) {
             throw new ReformatFatalError(
-                `Auto-Reformat: OpenRouter authentication failed (${response.status}). Check your API key.`,
+                `Auto-Reformat: OpenRouter authentication failed (${status}). Check your API key.`,
                 'invalid_api_key',
             );
         }
         const modelConfigError = getModelConfigErrorMessage({
-            contextLabel: 'Auto-Reformat', provider: 'OpenRouter', model, status: response.status, responseText: errText,
+            contextLabel: 'Auto-Reformat', provider: 'OpenRouter', model, status, responseText: errText,
         });
         if (modelConfigError) throw new ReformatFatalError(modelConfigError, 'invalid_model_config');
-        throw new ReformatExtractionError(`Auto-Reformat: OpenRouter HTTP ${response.status}: ${errText}`, batchIndex);
+        throw new ReformatExtractionError(`Auto-Reformat: OpenRouter HTTP ${status}: ${errText}`, batchIndex);
     }
 
-    const data = await response.json();
-    const reply = data?.choices?.[0]?.message?.content?.trim() || null;
-    const finishReason = data?.choices?.[0]?.finish_reason || null;
+    const reply = extractReply(result.data);
+    const finishReason = result.data?.choices?.[0]?.finish_reason || null;
     if (!reply) {
-        const bodyText = data?.error ? JSON.stringify(data.error) : JSON.stringify(data || {});
         const modelConfigError = getModelConfigErrorMessage({
-            contextLabel: 'Auto-Reformat', provider: 'OpenRouter', model, status: response.status, responseText: bodyText, enforceStatusGate: false,
+            contextLabel: 'Auto-Reformat', provider: 'OpenRouter', model, status: result.status, responseText: errorBodyText(result.data), enforceStatusGate: false,
         });
         if (modelConfigError) throw new ReformatFatalError(modelConfigError, 'invalid_model_config');
         throw new ReformatExtractionError('Auto-Reformat: OpenRouter returned empty response', batchIndex);
@@ -177,42 +171,36 @@ async function _callVLLM(prompt, settings, batchIndex) {
     const temperature = settings.reformat_temperature ?? DEFAULT_TEMPERATURE;
     const timeoutMs = settings.reformat_timeout_ms || DEFAULT_TIMEOUT_MS;
 
-    const response = await fetch('/api/backends/chat-completions/generate', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            chat_completion_source: 'custom',
-            custom_url: baseUrl,
-            model,
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: maxTokens,
-            temperature,
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
+    const result = await callChatCompletion({
+        provider: 'vllm',
+        model,
+        vllmUrl: baseUrl,
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens,
+        temperature,
+        timeoutMs,
     });
 
-    if (!response.ok) {
-        const errText = await response.text().catch(() => response.statusText);
-        if (response.status === 401 || response.status === 403) {
+    if (!result.ok) {
+        const { status, errText } = result;
+        if (status === 401 || status === 403) {
             throw new ReformatFatalError(
-                `Auto-Reformat: vLLM authentication failed (${response.status}). Check your API key.`,
+                `Auto-Reformat: vLLM authentication failed (${status}). Check your API key.`,
                 'invalid_api_key',
             );
         }
         const modelConfigError = getModelConfigErrorMessage({
-            contextLabel: 'Auto-Reformat', provider: 'vLLM', model, status: response.status, responseText: errText,
+            contextLabel: 'Auto-Reformat', provider: 'vLLM', model, status, responseText: errText,
         });
         if (modelConfigError) throw new ReformatFatalError(modelConfigError, 'invalid_model_config');
-        throw new ReformatExtractionError(`Auto-Reformat: vLLM HTTP ${response.status}: ${errText}`, batchIndex);
+        throw new ReformatExtractionError(`Auto-Reformat: vLLM HTTP ${status}: ${errText}`, batchIndex);
     }
 
-    const data = await response.json();
-    const reply = data?.choices?.[0]?.message?.content?.trim() || null;
-    const finishReason = data?.choices?.[0]?.finish_reason || null;
+    const reply = extractReply(result.data);
+    const finishReason = result.data?.choices?.[0]?.finish_reason || null;
     if (!reply) {
-        const bodyText = data?.error ? JSON.stringify(data.error) : JSON.stringify(data || {});
         const modelConfigError = getModelConfigErrorMessage({
-            contextLabel: 'Auto-Reformat', provider: 'vLLM', model, status: response.status, responseText: bodyText, enforceStatusGate: false,
+            contextLabel: 'Auto-Reformat', provider: 'vLLM', model, status: result.status, responseText: errorBodyText(result.data), enforceStatusGate: false,
         });
         if (modelConfigError) throw new ReformatFatalError(modelConfigError, 'invalid_model_config');
         throw new ReformatExtractionError('Auto-Reformat: vLLM returned empty response', batchIndex);

@@ -80,6 +80,36 @@ function crc32(data) {
 // ============================================================================
 
 /**
+ * Pushes `data` through a Compression/DecompressionStream and returns the
+ * result as one contiguous Uint8Array.
+ * @param {CompressionStream|DecompressionStream} transform
+ * @param {Uint8Array} data
+ * @returns {Promise<Uint8Array>}
+ */
+async function runThroughStream(transform, data) {
+    const writer = transform.writable.getWriter();
+    writer.write(data);
+    writer.close();
+
+    const chunks = [];
+    const reader = transform.readable.getReader();
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+    }
+
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+        result.set(chunk, offset);
+        offset += chunk.length;
+    }
+    return result;
+}
+
+/**
  * Compresses data using browser's native CompressionStream (deflate-raw)
  * @param {Uint8Array} data - Data to compress
  * @returns {Promise<Uint8Array>} Compressed data
@@ -88,28 +118,7 @@ async function compressDeflateRaw(data) {
     // Check if CompressionStream supports deflate-raw
     if (typeof CompressionStream !== 'undefined') {
         try {
-            const cs = new CompressionStream('deflate-raw');
-            const writer = cs.writable.getWriter();
-            writer.write(data);
-            writer.close();
-
-            const chunks = [];
-            const reader = cs.readable.getReader();
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-            }
-
-            // Combine chunks
-            const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-            const result = new Uint8Array(totalLength);
-            let offset = 0;
-            for (const chunk of chunks) {
-                result.set(chunk, offset);
-                offset += chunk.length;
-            }
-            return result;
+            return await runThroughStream(new CompressionStream('deflate-raw'), data);
         } catch (e) {
             // deflate-raw might not be supported, try regular deflate
             log.warn('VectFox PNG: deflate-raw not supported, trying deflate');
@@ -118,26 +127,7 @@ async function compressDeflateRaw(data) {
         try {
             // Regular deflate includes zlib header (2 bytes) and checksum (4 bytes)
             // We need to strip them for zTXt which expects raw deflate
-            const cs = new CompressionStream('deflate');
-            const writer = cs.writable.getWriter();
-            writer.write(data);
-            writer.close();
-
-            const chunks = [];
-            const reader = cs.readable.getReader();
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-            }
-
-            const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-            const result = new Uint8Array(totalLength);
-            let offset = 0;
-            for (const chunk of chunks) {
-                result.set(chunk, offset);
-                offset += chunk.length;
-            }
+            const result = await runThroughStream(new CompressionStream('deflate'), data);
 
             // Strip zlib header (2 bytes) and adler32 checksum (4 bytes)
             // zlib format: [CMF][FLG][...compressed data...][ADLER32]
@@ -162,27 +152,7 @@ async function decompressDeflateRaw(data) {
     if (typeof DecompressionStream !== 'undefined') {
         // Try deflate-raw first
         try {
-            const ds = new DecompressionStream('deflate-raw');
-            const writer = ds.writable.getWriter();
-            writer.write(data);
-            writer.close();
-
-            const chunks = [];
-            const reader = ds.readable.getReader();
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-            }
-
-            const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-            const result = new Uint8Array(totalLength);
-            let offset = 0;
-            for (const chunk of chunks) {
-                result.set(chunk, offset);
-                offset += chunk.length;
-            }
-            return result;
+            return await runThroughStream(new DecompressionStream('deflate-raw'), data);
         } catch (e) {
             // Try wrapping in zlib format for regular deflate decoder
             log.warn('VectFox PNG: deflate-raw decompress failed, trying with zlib wrapper');
@@ -201,27 +171,7 @@ async function decompressDeflateRaw(data) {
             zlibData[zlibData.length - 2] = 0;
             zlibData[zlibData.length - 1] = 1;
 
-            const ds = new DecompressionStream('deflate');
-            const writer = ds.writable.getWriter();
-            writer.write(zlibData);
-            writer.close();
-
-            const chunks = [];
-            const reader = ds.readable.getReader();
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-            }
-
-            const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-            const result = new Uint8Array(totalLength);
-            let offset = 0;
-            for (const chunk of chunks) {
-                result.set(chunk, offset);
-                offset += chunk.length;
-            }
-            return result;
+            return await runThroughStream(new DecompressionStream('deflate'), zlibData);
         } catch (e) {
             log.error('VectFox PNG: All decompression methods failed', e);
             throw new Error('Failed to decompress PNG data. Browser may not support required compression.');
