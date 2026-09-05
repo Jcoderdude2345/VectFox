@@ -8,7 +8,12 @@ VECTOR_LIST.md
 
 node_modules/
 .playwright-auth.json
-docs/
+docs/*
+!docs/agents/
+docs/agents/*
+!docs/agents/issue-tracker.md
+!docs/agents/triage-labels.md
+!docs/agents/domain.md
 .claude/
 .github/
 npm-debug.log*

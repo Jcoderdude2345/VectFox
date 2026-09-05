@@ -371,3 +371,20 @@ count above:
 - `jieba/` — `wasm-bindgen` glue + 4 MB WASM + 4 MB dict, loaded dynamically at
   `bm25-scorer.js:44-46, 134`. The `console.warn('using deprecated parameters…')`
   lines at `jieba_rs_wasm.js:392, 417` are upstream boilerplate, not dead code.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for Jcoderdude2345/VectFox.
+Before tracker operations, read `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels.
+Before triaging, read `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repo uses a single-context layout.
+Before exploring the codebase, read `docs/agents/domain.md`.
