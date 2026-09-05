@@ -1,0 +1,792 @@
+[
+  {
+    "kind": "database",
+    "width": 1440,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_browser_close",
+        "x": 1255,
+        "right": 1291,
+        "width": 36,
+        "height": 36,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-browser-tabs",
+        "x": 121,
+        "right": 1319,
+        "width": 1198,
+        "height": 50.46875,
+        "scrollWidth": 1198,
+        "clientWidth": 1198,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-modal-header",
+        "x": 121,
+        "right": 1319,
+        "width": 1198,
+        "height": 94,
+        "scrollWidth": 1198,
+        "clientWidth": 1198,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "kind": "database",
+    "width": 769,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_browser_close",
+        "x": 684.765625,
+        "right": 720.765625,
+        "width": 36,
+        "height": 36,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-browser-tabs",
+        "x": 20.21875,
+        "right": 748.765625,
+        "width": 728.546875,
+        "height": 50.46875,
+        "scrollWidth": 729,
+        "clientWidth": 729,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-modal-header",
+        "x": 20.21875,
+        "right": 748.765625,
+        "width": 728.546875,
+        "height": 106,
+        "scrollWidth": 729,
+        "clientWidth": 729,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "kind": "database",
+    "width": 768,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_browser_close",
+        "x": 716,
+        "right": 752,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-browser-tabs",
+        "x": 0,
+        "right": 768,
+        "width": 768,
+        "height": 53,
+        "scrollWidth": 768,
+        "clientWidth": 768,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-modal-header",
+        "x": 0,
+        "right": 768,
+        "width": 768,
+        "height": 70,
+        "scrollWidth": 768,
+        "clientWidth": 768,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "kind": "database",
+    "width": 641,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_browser_close",
+        "x": 589,
+        "right": 625,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-browser-tabs",
+        "x": 0,
+        "right": 641,
+        "width": 641,
+        "height": 53,
+        "scrollWidth": 641,
+        "clientWidth": 641,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-modal-header",
+        "x": 0,
+        "right": 641,
+        "width": 641,
+        "height": 70,
+        "scrollWidth": 641,
+        "clientWidth": 641,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "kind": "database",
+    "width": 390,
+    "failed": [
+      {
+        "selector": "#vectfox_browser_close",
+        "x": 500.40625,
+        "right": 536.40625,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": true,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-modal-header",
+        "x": 0,
+        "right": 390,
+        "width": 390,
+        "height": 72,
+        "scrollWidth": 536,
+        "clientWidth": 390,
+        "outside": false,
+        "overflow": true
+      }
+    ],
+    "metrics": [
+      {
+        "selector": "#vectfox_browser_close",
+        "x": 500.40625,
+        "right": 536.40625,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": true,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-browser-tabs",
+        "x": 0,
+        "right": 390,
+        "width": 390,
+        "height": 53,
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-modal-header",
+        "x": 0,
+        "right": 390,
+        "width": 390,
+        "height": 72,
+        "scrollWidth": 536,
+        "clientWidth": 390,
+        "outside": false,
+        "overflow": true
+      }
+    ]
+  },
+  {
+    "kind": "database",
+    "width": 320,
+    "failed": [
+      {
+        "selector": "#vectfox_browser_close",
+        "x": 500.40625,
+        "right": 536.40625,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": true,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-modal-header",
+        "x": 0,
+        "right": 320,
+        "width": 320,
+        "height": 72,
+        "scrollWidth": 536,
+        "clientWidth": 320,
+        "outside": false,
+        "overflow": true
+      }
+    ],
+    "metrics": [
+      {
+        "selector": "#vectfox_browser_close",
+        "x": 500.40625,
+        "right": 536.40625,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": true,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-browser-tabs",
+        "x": 0,
+        "right": 320,
+        "width": 320,
+        "height": 53,
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-modal-header",
+        "x": 0,
+        "right": 320,
+        "width": 320,
+        "height": 72,
+        "scrollWidth": 536,
+        "clientWidth": 320,
+        "outside": false,
+        "overflow": true
+      }
+    ]
+  },
+  {
+    "kind": "wiki",
+    "width": 1440,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_wl_close",
+        "x": 1104,
+        "right": 1140,
+        "width": 36,
+        "height": 36,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-filter-row",
+        "x": 288,
+        "right": 1152,
+        "width": 864,
+        "height": 62,
+        "scrollWidth": 864,
+        "clientWidth": 864,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": "#vectfox_wl_query",
+        "x": 516,
+        "right": 1070.625,
+        "width": 554.625,
+        "height": 46,
+        "scrollWidth": 551,
+        "clientWidth": 551,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-mode-toggle",
+        "x": 1078.625,
+        "right": 1152,
+        "width": 73.375,
+        "height": 19,
+        "scrollWidth": 73,
+        "clientWidth": 73,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row",
+        "x": 293,
+        "right": 1147,
+        "width": 854,
+        "height": 44,
+        "scrollWidth": 854,
+        "clientWidth": 854,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-title",
+        "x": 345,
+        "right": 683.703125,
+        "width": 338.703125,
+        "height": 16,
+        "scrollWidth": 339,
+        "clientWidth": 339,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row-actions",
+        "x": 1065,
+        "right": 1139,
+        "width": 74,
+        "height": 36,
+        "scrollWidth": 74,
+        "clientWidth": 74,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "kind": "wiki",
+    "width": 769,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_wl_close",
+        "x": 672.234375,
+        "right": 708.234375,
+        "width": 36,
+        "height": 36,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-filter-row",
+        "x": 48.765625,
+        "right": 720.234375,
+        "width": 671.46875,
+        "height": 62,
+        "scrollWidth": 671,
+        "clientWidth": 671,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": "#vectfox_wl_query",
+        "x": 276.765625,
+        "right": 638.859375,
+        "width": 362.09375,
+        "height": 46,
+        "scrollWidth": 358,
+        "clientWidth": 358,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-mode-toggle",
+        "x": 646.859375,
+        "right": 720.234375,
+        "width": 73.375,
+        "height": 19,
+        "scrollWidth": 73,
+        "clientWidth": 73,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row",
+        "x": 53.765625,
+        "right": 715.234375,
+        "width": 661.46875,
+        "height": 44,
+        "scrollWidth": 661,
+        "clientWidth": 661,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-title",
+        "x": 105.765625,
+        "right": 319.328125,
+        "width": 213.5625,
+        "height": 16,
+        "scrollWidth": 214,
+        "clientWidth": 214,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row-actions",
+        "x": 633.234375,
+        "right": 707.234375,
+        "width": 74,
+        "height": 36,
+        "scrollWidth": 74,
+        "clientWidth": 74,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "kind": "wiki",
+    "width": 768,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_wl_close",
+        "x": 716,
+        "right": 752,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-filter-row",
+        "x": 12,
+        "right": 756,
+        "width": 744,
+        "height": 62,
+        "scrollWidth": 744,
+        "clientWidth": 744,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": "#vectfox_wl_query",
+        "x": 240,
+        "right": 665.625,
+        "width": 425.625,
+        "height": 46,
+        "scrollWidth": 422,
+        "clientWidth": 422,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-mode-toggle",
+        "x": 673.625,
+        "right": 756,
+        "width": 82.375,
+        "height": 28,
+        "scrollWidth": 82,
+        "clientWidth": 82,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row",
+        "x": 17,
+        "right": 751,
+        "width": 734,
+        "height": 52,
+        "scrollWidth": 734,
+        "clientWidth": 734,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-title",
+        "x": 78,
+        "right": 329.703125,
+        "width": 251.703125,
+        "height": 16,
+        "scrollWidth": 252,
+        "clientWidth": 252,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row-actions",
+        "x": 669,
+        "right": 743,
+        "width": 74,
+        "height": 44,
+        "scrollWidth": 74,
+        "clientWidth": 74,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "kind": "wiki",
+    "width": 641,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_wl_close",
+        "x": 589,
+        "right": 625,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-filter-row",
+        "x": 12,
+        "right": 629,
+        "width": 617,
+        "height": 62,
+        "scrollWidth": 617,
+        "clientWidth": 617,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": "#vectfox_wl_query",
+        "x": 240,
+        "right": 538.625,
+        "width": 298.625,
+        "height": 46,
+        "scrollWidth": 295,
+        "clientWidth": 295,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-mode-toggle",
+        "x": 546.625,
+        "right": 629,
+        "width": 82.375,
+        "height": 28,
+        "scrollWidth": 82,
+        "clientWidth": 82,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row",
+        "x": 17,
+        "right": 624,
+        "width": 607,
+        "height": 52,
+        "scrollWidth": 607,
+        "clientWidth": 607,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-title",
+        "x": 78,
+        "right": 247.15625,
+        "width": 169.15625,
+        "height": 16,
+        "scrollWidth": 169,
+        "clientWidth": 169,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row-actions",
+        "x": 542,
+        "right": 616,
+        "width": 74,
+        "height": 44,
+        "scrollWidth": 74,
+        "clientWidth": 74,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "kind": "wiki",
+    "width": 390,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_wl_close",
+        "x": 342,
+        "right": 378,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-filter-row",
+        "x": 12,
+        "right": 378,
+        "width": 366,
+        "height": 62,
+        "scrollWidth": 366,
+        "clientWidth": 366,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": "#vectfox_wl_query",
+        "x": 240,
+        "right": 287.625,
+        "width": 47.625,
+        "height": 46,
+        "scrollWidth": 44,
+        "clientWidth": 44,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-mode-toggle",
+        "x": 295.625,
+        "right": 378,
+        "width": 82.375,
+        "height": 28,
+        "scrollWidth": 82,
+        "clientWidth": 82,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row",
+        "x": 17,
+        "right": 373,
+        "width": 356,
+        "height": 52,
+        "scrollWidth": 356,
+        "clientWidth": 356,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-title",
+        "x": 78,
+        "right": 211,
+        "width": 133,
+        "height": 16,
+        "scrollWidth": 133,
+        "clientWidth": 133,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row-actions",
+        "x": 291,
+        "right": 365,
+        "width": 74,
+        "height": 44,
+        "scrollWidth": 74,
+        "clientWidth": 74,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  },
+  {
+    "kind": "wiki",
+    "width": 320,
+    "failed": [],
+    "metrics": [
+      {
+        "selector": "#vectfox_wl_close",
+        "x": 272,
+        "right": 308,
+        "width": 36,
+        "height": 44,
+        "scrollWidth": 34,
+        "clientWidth": 34,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-filter-row",
+        "x": 12,
+        "right": 308,
+        "width": 296,
+        "height": 98,
+        "scrollWidth": 296,
+        "clientWidth": 296,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": "#vectfox_wl_query",
+        "x": 240,
+        "right": 308,
+        "width": 68,
+        "height": 46,
+        "scrollWidth": 64,
+        "clientWidth": 64,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-mode-toggle",
+        "x": 12,
+        "right": 94.375,
+        "width": 82.375,
+        "height": 28,
+        "scrollWidth": 82,
+        "clientWidth": 82,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-row",
+        "x": 17,
+        "right": 303,
+        "width": 286,
+        "height": 52,
+        "scrollWidth": 286,
+        "clientWidth": 286,
+        "outside": false,
+        "overflow": false
+      },
+      {
+        "selector": ".vectfox-wl-title",
+        "x": 78,
+        "right": 141,
+        "width": 63,
+        "height": 16,
+        "scrollWidth": 92,
+        "clientWidth": 63,
+        "outside": false,
+        "overflow": true
+      },
+      {
+        "selector": ".vectfox-wl-row-actions",
+        "x": 221,
+        "right": 295,
+        "width": 74,
+        "height": 44,
+        "scrollWidth": 74,
+        "clientWidth": 74,
+        "outside": false,
+        "overflow": false
+      }
+    ]
+  }
+]

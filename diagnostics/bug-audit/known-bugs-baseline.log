@@ -1,0 +1,251 @@
+
+ RUN  v2.1.9 C:/Users/jrees/OneDrive/Documents/GitHub/VectFox
+
+ × .bug-repro/prompts-i18n.test.js > prompt mode resolution > planner prompts > DIAG does NOT fall back for prototype-chain keys — they resolve to undefined... no, ?? keeps intl
+   → expected 'function' to be 'string' // Object.is equality
+ × .bug-repro/prompts-i18n.test.js > prompt mode resolution > summarize prompts > DIAG does NOT fall back for prototype-chain keys — they resolve to undefined... no, ?? keeps intl
+   → expected 'function' to be 'string' // Object.is equality
+ × .bug-repro/prompts-i18n.test.js > prompt mode resolution > extraction prompts > DIAG does NOT fall back for prototype-chain keys — they resolve to undefined... no, ?? keeps intl
+   → expected 'function' to be 'string' // Object.is equality
+ × .bug-repro/chunking.test.js > section strategy > DIAG returns header-less text as ONE chunk — the paragraph fallback is dead code
+   → expected [ 'alpha\n\nbeta' ] to deeply equal [ 'alpha', 'beta' ]
+ × .bug-repro/corpus-stats.test.js > statistics computation > DIAG counts empty chunks in totalDocs but not in the length total — deflating avgDocLength
+   → expected 4 to be 1 // Object.is equality
+ × .bug-repro/emotion-classifier.test.js > classifyEmotion > DIAG keys the cache on the model but NOT on options.model — an override poisons the cache
+   → expected 'anger' to be 'joy' // Object.is equality
+ × .bug-repro/emotion-classifier.test.js > classifyEmotion > DIAG keys the cache on only the first 100 characters of the text
+   → expected "spy" to be called 2 times, but got 1 times
+ × .bug-repro/png-export.test.js > embed / extract round trip > DIAG re-embedding produces a PNG with TWO VectFox chunks; extraction returns the first
+   → expected { generator: 'VectFox', gen: 1 } to deeply equal { generator: 'VectFox', gen: 2 }
+ × .bug-repro/png-export.test.js > isVectFoxPNG > DIAG returns the raw version STRING, not a boolean, for a non-VectFox versioned payload
+   → expected '1.0' to be true // Object.is equality
+ × .bug-repro/png-export.test.js > isVectFoxPNG > DIAG returns undefined, not false, for a VectFox chunk with neither generator nor version
+   → expected undefined to be false // Object.is equality
+ × .bug-repro/agentic-retrieval.test.js > planner LLM call > DIAG shows pre-search candidate scores as "—" because _finalScore is not a field the formatter reads
+   → expected 'Recent chat (oldest first):\n  (no re…' to contain 'E1 [0.93]'
+ × .bug-repro/eventbase-extractor.test.js > excerpt and prompt construction > DIAG STILL calls the LLM for a window of empty messages — the empty-window guard is defeated by speaker labels
+   → expected "spy" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      "/api/backends/chat-completions/generate",
+      [Object],
+    ]
+
+
+Number of calls: 1
+
+
+ Test Files  7 failed (7)
+      Tests  12 failed | 318 skipped (330)
+   Start at  08:23:51
+   Duration  2.55s (transform 807ms, setup 0ms, collect 2.13s, tests 129ms, environment 1ms, prepare 957ms)
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .bug-repro/agentic-retrieval.test.js > planner LLM call > DIAG shows pre-search candidate scores as "—" because _finalScore is not a field the formatter reads
+AssertionError: expected 'Recent chat (oldest first):\n  (no re…' to contain 'E1 [0.93]'
+
+- Expected
++ Received
+
+- E1 [0.93]
++ Recent chat (oldest first):
++   (no recent context — start of conversation)
++
++ Current user message:
++   what happened at the docks?
++
++ Candidate events from pre-search (top by similarity, may be incomplete):
++   E1 [—] event — ranked hit
++       importance: ?
++
++ Plan retrieval. Return strict JSON only.
+
+ ❯ .bug-repro/agentic-retrieval.test.js:339:55
+    337|         globalThis.fetch.mockResolvedValue(plannerReply({ queries: ['q…
+    338|         await retrieveEventsWithAgent(params());
+    339|         expect(lastPlannerBody().messages[1].content).toContain('E1 [0…
+       |                                                       ^
+    340|     });
+    341| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+ FAIL  .bug-repro/chunking.test.js > section strategy > DIAG returns header-less text as ONE chunk — the paragraph fallback is dead code
+AssertionError: expected [ 'alpha\n\nbeta' ] to deeply equal [ 'alpha', 'beta' ]
+
+- Expected
++ Received
+
+  Array [
+-   "alpha",
+-   "beta",
++   "alpha
++
++ beta",
+  ]
+
+ ❯ .bug-repro/chunking.test.js:323:38
+    321|         // are therefore NOT split at all, contrary to the code's inte…
+    322|         const out = await chunkText('alpha\n\nbeta', { strategy: 'sect…
+    323|         expect(out.map(c => c.text)).toEqual(['alpha', 'beta']);
+       |                                      ^
+    324|         expect(out[0].metadata.strategy).toBe('section');
+    325|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+
+ FAIL  .bug-repro/corpus-stats.test.js > statistics computation > DIAG counts empty chunks in totalDocs but not in the length total — deflating avgDocLength
+AssertionError: expected 4 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 4
+
+ ❯ .bug-repro/corpus-stats.test.js:206:37
+    204|         ]));
+    205|         return getCorpusStats(freshId(), settings()).then(stats => {
+    206|             expect(stats.totalDocs).toBe(1);
+       |                                     ^
+    207|             expect(stats.avgDocLength).toBe(4); // 4 / 4, not 4 / 1
+    208|         });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯
+
+ FAIL  .bug-repro/emotion-classifier.test.js > classifyEmotion > DIAG keys the cache on the model but NOT on options.model — an override poisons the cache
+AssertionError: expected 'anger' to be 'joy' // Object.is equality
+
+Expected: "joy"
+Received: "anger"
+
+ ❯ .bug-repro/emotion-classifier.test.js:235:30
+    233|         globalThis.fetch.mockResolvedValue(classifyResponse(['joy', 0.…
+    234|         const second = await classifyEmotion('same text');
+    235|         expect(second.label).toBe('joy');
+       |                              ^
+    236|         expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    237|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/12]⎯
+
+ FAIL  .bug-repro/emotion-classifier.test.js > classifyEmotion > DIAG keys the cache on only the first 100 characters of the text
+AssertionError: expected "spy" to be called 2 times, but got 1 times
+ ❯ .bug-repro/emotion-classifier.test.js:246:34
+    244|         await classifyEmotion(`${prefix} first ending`);
+    245|         const second = await classifyEmotion(`${prefix} completely dif…
+    246|         expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+       |                                  ^
+    247|         expect(second.label).toBe('joy');
+    248|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/12]⎯
+
+ FAIL  .bug-repro/eventbase-extractor.test.js > excerpt and prompt construction > DIAG STILL calls the LLM for a window of empty messages — the empty-window guard is defeated by speaker labels
+AssertionError: expected "spy" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      "/api/backends/chat-completions/generate",
+      [Object],
+    ]
+
+
+Number of calls: 1
+
+ ❯ .bug-repro/eventbase-extractor.test.js:116:38
+    114|         // of blank messages burns a full LLM call instead of short-ci…
+    115|         await run({ messages: [{ name: 'A', mes: '' }, { name: 'B', me…
+    116|         expect(globalThis.fetch).not.toHaveBeenCalled();
+       |                                      ^
+    117|     });
+    118| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/12]⎯
+
+ FAIL  .bug-repro/png-export.test.js > embed / extract round trip > DIAG re-embedding produces a PNG with TWO VectFox chunks; extraction returns the first
+AssertionError: expected { generator: 'VectFox', gen: 1 } to deeply equal { generator: 'VectFox', gen: 2 }
+
+- Expected
++ Received
+
+  Object {
+-   "gen": 2,
++   "gen": 1,
+    "generator": "VectFox",
+  }
+
+ ❯ .bug-repro/png-export.test.js:165:50
+    163|         const first = await embedDataInPNG({ generator: 'VectFox', gen…
+    164|         const second = await embedDataInPNG({ generator: 'VectFox', ge…
+    165|         expect(await extractDataFromPNG(second)).toEqual({ generator: …
+       |                                                  ^
+    166|         const zCount = new TextDecoder('latin1').decode(second).split(…
+    167|         expect(zCount).toBe(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/12]⎯
+
+ FAIL  .bug-repro/png-export.test.js > isVectFoxPNG > DIAG returns the raw version STRING, not a boolean, for a non-VectFox versioned payload
+AssertionError: expected '1.0' to be true // Object.is equality
+
+- Expected: 
+true
+
++ Received: 
+"1.0"
+
+ ❯ .bug-repro/png-export.test.js:317:51
+    315|         // unaffected — but `=== true` comparisons would silently fail.
+    316|         const png = makeBasePNG([textChunk('VectFox', btoa('{"version"…
+    317|         expect(await isVectFoxPNG(fileFrom(png))).toBe(true);
+       |                                                   ^
+    318|     });
+    319| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/12]⎯
+
+ FAIL  .bug-repro/png-export.test.js > isVectFoxPNG > DIAG returns undefined, not false, for a VectFox chunk with neither generator nor version
+AssertionError: expected undefined to be false // Object.is equality
+
+- Expected: 
+false
+
++ Received: 
+undefined
+
+ ❯ .bug-repro/png-export.test.js:323:51
+    321|         // Same leak as above on the negative side.
+    322|         const png = makeBasePNG([textChunk('VectFox', btoa('{"chunks":…
+    323|         expect(await isVectFoxPNG(fileFrom(png))).toBe(false);
+       |                                                   ^
+    324|     });
+    325| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/12]⎯
+
+ FAIL  .bug-repro/prompts-i18n.test.js > prompt mode resolution > planner prompts > DIAG does NOT fall back for prototype-chain keys — they resolve to undefined... no, ?? keeps intl
+ FAIL  .bug-repro/prompts-i18n.test.js > prompt mode resolution > summarize prompts > DIAG does NOT fall back for prototype-chain keys — they resolve to undefined... no, ?? keeps intl
+ FAIL  .bug-repro/prompts-i18n.test.js > prompt mode resolution > extraction prompts > DIAG does NOT fall back for prototype-chain keys — they resolve to undefined... no, ?? keeps intl
+AssertionError: expected 'function' to be 'string' // Object.is equality
+
+Expected: "string"
+Received: "function"
+
+ ❯ .bug-repro/prompts-i18n.test.js:55:51
+     53|                 // fallback is skipped and a FUNCTION is returned inst…
+     54|                 // prompt string. Latent bug; unreachable from the set…
+     55|                 expect(typeof getter('toString')).toBe('string');
+       |                                                   ^
+     56|                 expect(typeof getter('constructor')).toBe('string');
+     57|             });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/12]⎯
+

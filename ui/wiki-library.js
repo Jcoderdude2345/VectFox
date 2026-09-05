@@ -531,7 +531,7 @@ function buildPageRow(record) {
     const badges = $('<span class="vectfox-wl-badges">');
     const shown = record.categories.slice(0, 3);
     for (const category of shown) {
-        badges.append($('<span class="vectfox-wl-badge">').text(category).on('click', async () => {
+        badges.append($('<span class="vectfox-wl-badge">').text(category).attr('title', category).on('click', async () => {
             libraryState.categories.add(category);
             libraryState.shownLimit = PAGE_SLICE;
             await renderPagesTab();

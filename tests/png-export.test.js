@@ -104,6 +104,32 @@ afterEach(() => vi.restoreAllMocks());
 // ---------------------------------------------------------------------------
 
 describe('embed / extract round trip', () => {
+    it('replaces legacy payloads while preserving other metadata and image bytes', async () => {
+        const character = textChunk('chara', 'keep character metadata');
+        const pixels = chunk('IDAT', new Uint8Array([1, 2, 3, 4]));
+        const base = makeBasePNG([
+            textChunk('VectFox', JSON.stringify({ generator: 'VectFox', gen: 0 })),
+            textChunk('VectFox', JSON.stringify({ generator: 'VectFox', gen: -1 })),
+            character,
+            pixels,
+        ]);
+        const first = await embedDataInPNG({ generator: 'VectFox', gen: 1 }, base);
+        // Honor a Uint8Array view's offset, as well as removing all prior payloads.
+        const padded = concat(new Uint8Array([99]), first, new Uint8Array([99]));
+        const second = await embedDataInPNG({ generator: 'VectFox', gen: 2 }, padded.subarray(1, padded.length - 1));
+        expect(await extractDataFromPNG(second)).toEqual({ generator: 'VectFox', gen: 2 });
+        const chunks = [];
+        for (let offset = 8; offset < second.length;) {
+            const length = new DataView(second.buffer, second.byteOffset + offset).getUint32(0, false);
+            chunks.push(second.slice(offset, offset + length + 12));
+            offset += length + 12;
+        }
+        expect(chunks).toContainEqual(character);
+        expect(chunks).toContainEqual(pixels);
+        expect(chunks.filter(bytes => new TextDecoder().decode(bytes.slice(4, 8)) === 'zTXt')).toHaveLength(1);
+        expect(chunks.filter(bytes => new TextDecoder().decode(bytes.slice(8)).startsWith('VectFox\0'))).toHaveLength(1);
+    });
+
     it('survives a full round trip with the data intact', async () => {
         const png = await embedDataInPNG(sampleExport, makeBasePNG());
         expect(await extractDataFromPNG(png)).toEqual(sampleExport);
@@ -157,14 +183,12 @@ describe('embed / extract round trip', () => {
         expect(await extractDataFromPNG(png)).toEqual({ keep: 1, arr: [1, null] });
     });
 
-    it('re-embedding produces a PNG with TWO VectFox chunks; extraction returns the first', async () => {
-        // BUG-SHAPED: there is no replace-existing logic, so repeated exports
-        // through the same base image accumulate stale payloads.
+    it('replaces the prior VectFox payload on repeated export', async () => {
         const first = await embedDataInPNG({ generator: 'VectFox', gen: 1 }, makeBasePNG());
         const second = await embedDataInPNG({ generator: 'VectFox', gen: 2 }, first);
-        expect(await extractDataFromPNG(second)).toEqual({ generator: 'VectFox', gen: 1 });
+        expect(await extractDataFromPNG(second)).toEqual({ generator: 'VectFox', gen: 2 });
         const zCount = new TextDecoder('latin1').decode(second).split('zTXt').length - 1;
-        expect(zCount).toBe(2);
+        expect(zCount).toBe(1);
     });
 });
 
@@ -308,19 +332,14 @@ describe('isVectFoxPNG', () => {
         expect(await isVectFoxPNG(fileFrom(new Uint8Array([1, 2, 3])))).toBe(false);
     });
 
-    it('returns the raw version STRING, not a boolean, for a non-VectFox versioned payload', async () => {
-        // BUG-SHAPED: the JSDoc promises Promise<boolean>, but the expression
-        // `data !== null && (data.generator === 'VectFox' || data.version)`
-        // short-circuits to `data.version` itself. Truthy, so `if` callers are
-        // unaffected — but `=== true` comparisons would silently fail.
+    it('returns true for a versioned legacy payload', async () => {
         const png = makeBasePNG([textChunk('VectFox', btoa('{"version":"1.0","generator":"SomethingElse"}'))]);
-        expect(await isVectFoxPNG(fileFrom(png))).toBe('1.0');
+        expect(await isVectFoxPNG(fileFrom(png))).toBe(true);
     });
 
-    it('returns undefined, not false, for a VectFox chunk with neither generator nor version', async () => {
-        // Same leak as above on the negative side.
+    it('returns false for a payload without generator or version', async () => {
         const png = makeBasePNG([textChunk('VectFox', btoa('{"chunks":[]}'))]);
-        expect(await isVectFoxPNG(fileFrom(png))).toBeUndefined();
+        expect(await isVectFoxPNG(fileFrom(png))).toBe(false);
     });
 
     it('does return a real boolean on the paths that short-circuit early', async () => {

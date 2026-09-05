@@ -47,13 +47,9 @@ describe('prompt mode resolution', () => {
                 expect(getter()).toBe(intl);
             });
 
-            it('does NOT fall back for prototype-chain keys — they resolve to undefined... no, ?? keeps intl', () => {
-                // `_PROMPTS[mode] ?? _PROMPTS.intl` — 'toString' resolves to
-                // Object.prototype.toString (a function, not nullish), so the
-                // fallback is skipped and a FUNCTION is returned instead of a
-                // prompt string. Latent bug; unreachable from the settings UI.
-                expect(typeof getter('toString')).toBe('function');
-                expect(typeof getter('constructor')).toBe('function');
+            it('falls back to intl for inherited object keys', () => {
+                expect(getter('toString')).toBe(getter('intl'));
+                expect(getter('constructor')).toBe(getter('intl'));
             });
 
             it('returns the identical string instance on repeated calls (module constants, not rebuilt)', () => {

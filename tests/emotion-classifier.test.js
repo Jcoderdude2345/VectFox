@@ -222,28 +222,24 @@ describe('classifyEmotion', () => {
         expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body).model).toBe('override/model');
     });
 
-    it('keys the cache on the model but NOT on options.model — an override poisons the cache', async () => {
-        // BUG-SHAPED: cacheKey uses settings.model, so a one-off override is
-        // stored under the default model's key and served back to later
-        // default-model calls.
+    it('isolates per-call model overrides in the cache', async () => {
         enableClassifier();
         globalThis.fetch.mockResolvedValue(classifyResponse(['anger', 0.99]));
         await classifyEmotion('same text', { model: 'override/model' });
 
         globalThis.fetch.mockResolvedValue(classifyResponse(['joy', 0.5]));
         const second = await classifyEmotion('same text');
-        expect(second.label).toBe('anger');
-        expect(globalThis.fetch).toHaveBeenCalledOnce();
+        expect(second.label).toBe('joy');
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     });
 
-    it('keys the cache on only the first 100 characters of the text', async () => {
-        // BUG-SHAPED: two long texts sharing a 100-char prefix collide.
+    it('does not collide on a shared 100-character prefix', async () => {
         enableClassifier();
         const prefix = 'p'.repeat(100);
         globalThis.fetch.mockResolvedValue(classifyResponse(['joy', 0.9]));
         await classifyEmotion(`${prefix} first ending`);
         const second = await classifyEmotion(`${prefix} completely different ending`);
-        expect(globalThis.fetch).toHaveBeenCalledOnce();
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
         expect(second.label).toBe('joy');
     });
 

@@ -221,8 +221,10 @@ const STRATEGIES = {
         const sections = [];
         let lastIndex = 0;
         let match;
+        let foundHeader = false;
 
         while ((match = headerRegex.exec(text)) !== null) {
+            foundHeader = true;
             if (match.index > lastIndex) {
                 const beforeContent = text.slice(lastIndex, match.index).trim();
                 if (beforeContent) {
@@ -232,13 +234,13 @@ const STRATEGIES = {
             lastIndex = match.index;
         }
 
-        if (lastIndex < text.length) {
-            sections.push(text.slice(lastIndex).trim());
+        // If no headers found, fall back to paragraph
+        if (!foundHeader) {
+            return STRATEGIES.paragraph(text, options);
         }
 
-        // If no headers found, fall back to paragraph
-        if (sections.length === 0) {
-            return STRATEGIES.paragraph(text, options);
+        if (lastIndex < text.length) {
+            sections.push(text.slice(lastIndex).trim());
         }
 
         return sections.filter(s => s);

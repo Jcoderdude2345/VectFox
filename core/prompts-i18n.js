@@ -334,7 +334,7 @@ const _PLANNER_PROMPTS = {
  * @returns {string}
  */
 export function getAgenticPlannerPrompt(mode) {
-    return _PLANNER_PROMPTS[mode] ?? _PLANNER_PROMPTS.intl;
+    return Object.prototype.hasOwnProperty.call(_PLANNER_PROMPTS, mode) ? _PLANNER_PROMPTS[mode] : _PLANNER_PROMPTS.intl;
 }
 
 
@@ -443,7 +443,7 @@ const _SUMMARIZE_PROMPTS = {
  * @returns {string}
  */
 export function getDefaultSummarizePrompt(mode) {
-    return _SUMMARIZE_PROMPTS[mode] ?? _SUMMARIZE_PROMPTS.intl;
+    return Object.prototype.hasOwnProperty.call(_SUMMARIZE_PROMPTS, mode) ? _SUMMARIZE_PROMPTS[mode] : _SUMMARIZE_PROMPTS.intl;
 }
 
 
@@ -731,7 +731,7 @@ const _EXTRACTION_PROMPTS = {
  * @returns {string}
  */
 export function getEventBaseExtractionPrompt(mode) {
-    return _EXTRACTION_PROMPTS[mode] ?? _EXTRACTION_PROMPTS.intl;
+    return Object.prototype.hasOwnProperty.call(_EXTRACTION_PROMPTS, mode) ? _EXTRACTION_PROMPTS[mode] : _EXTRACTION_PROMPTS.intl;
 }
 
 
@@ -791,7 +791,8 @@ export function buildPlannerUserMessage({ recentTurns, userMessage, candidates }
  * Format: E<N> [score] type — text (chars: [...], concepts: [...], importance: X)
  */
 function _formatCandidateLine(ev, idx) {
-    const score = typeof ev.score === 'number' ? ev.score.toFixed(2)
+    const score = typeof ev._finalScore === 'number' ? ev._finalScore.toFixed(2)
+        : typeof ev.score === 'number' ? ev.score.toFixed(2)
         : typeof ev.vectorScore === 'number' ? ev.vectorScore.toFixed(2)
         : '—';
     const type = ev.event_type || ev.metadata?.event_type || 'event';

@@ -212,7 +212,7 @@ function createBrowserModal() {
                 <!-- Header -->
                 <div class="vectfox-modal-header">
                     <h3>🗃️ VECTFOX Database Browser</h3>
-                    <div style="display:flex;gap:6px;align-items:center;">
+                    <div class="vectfox-browser-header-actions">
                         <button class="vectfox-btn vectfox-btn-sm" id="vectfox_browser_refresh_scan" title="Probe standard and qdrant backends, update the registry, and remove stale entries">
                             ${icons.refreshCw(14)} Refresh Scan
                         </button>

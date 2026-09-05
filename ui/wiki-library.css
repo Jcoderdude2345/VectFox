@@ -223,9 +223,14 @@ a.vectfox-wl-title:hover {
     display: flex;
     gap: 4px;
     flex-shrink: 0;
+    max-width: 35%;
+    min-width: 0;
 }
 
 .vectfox-wl-badge {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     padding: 1px 8px;
     border-radius: 999px;
     background: color-mix(in srgb, var(--SmartThemeQuoteColor) 15%, transparent);

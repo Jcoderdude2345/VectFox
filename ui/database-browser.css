@@ -29,6 +29,25 @@
     flex-direction: column;
 }
 
+.vectfox-database-browser-content > .vectfox-modal-header {
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.vectfox-browser-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+}
+
+.vectfox-browser-header-actions > .vectfox-btn {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+}
+
 /* Browser Tabs - Segmented Control Style */
 .vectfox-browser-tabs {
     display: flex;

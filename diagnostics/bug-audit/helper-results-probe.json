@@ -1,0 +1,35 @@
+[
+  {
+    "case": "1.9 kana counted once",
+    "pass": true,
+    "actual": null
+  },
+  {
+    "case": "1.10 cleanup request backend",
+    "input": "standard",
+    "expected": "vectra",
+    "actual": "vectra",
+    "pass": true
+  },
+  {
+    "case": "1.10 cleanup request backend",
+    "input": "(missing)",
+    "expected": "vectra",
+    "actual": "vectra",
+    "pass": true
+  },
+  {
+    "case": "1.10 cleanup request backend",
+    "input": "vectra",
+    "expected": "vectra",
+    "actual": "vectra",
+    "pass": true
+  },
+  {
+    "case": "1.10 cleanup request backend",
+    "input": "qdrant",
+    "expected": "qdrant",
+    "actual": "qdrant",
+    "pass": true
+  }
+]

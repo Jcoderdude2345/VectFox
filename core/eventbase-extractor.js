@@ -293,7 +293,8 @@ function _inferLanguageHint(text) {
     if (!text) return null;
     const hangul = (text.match(/[\uAC00-\uD7AF]/g) || []).length;
     const hiragana = (text.match(/[\u3040-\u309F\u30A0-\u30FF]/g) || []).length;
-    const cjk = (text.match(/[\u3000-\u9FFF\uF900-\uFAFF]/g) || []).length + hangul + hiragana;
+    // The broad CJK range already includes kana; only Hangul is disjoint.
+    const cjk = (text.match(/[\u3000-\u9FFF\uF900-\uFAFF]/g) || []).length + hangul;
     const latin = (text.match(/[a-zA-Z]/g) || []).length;
     const total = cjk + latin;
     if (total === 0 || cjk / total < 0.15) return null; // too little CJK to guess
@@ -473,8 +474,9 @@ export async function extractEvents({ messages, windowStart, windowEnd, settings
     const excerptLines = messages.map(m => {
         const speaker = m.name || (m.is_user ? 'User' : 'Assistant');
         const text = cleanText(String(m.mes || '')).trim();
+        if (!text) return null;
         return `${speaker}: ${text}`;
-    });
+    }).filter(line => line !== null);
     const excerptText = excerptLines.join('\n\n');
 
     if (!excerptText.trim()) {

@@ -246,7 +246,8 @@ function parseChunks(pngData) {
 }
 
 /**
- * Reconstructs PNG from chunks, inserting a new chunk before IEND
+ * Replaces VectFox text payloads with a new chunk before IEND.
+ * Other chunks (including other extensions' metadata) remain byte-identical.
  * @param {Uint8Array} originalPng - Original PNG data
  * @param {Uint8Array} newChunk - New chunk to insert
  * @returns {Uint8Array} New PNG with inserted chunk
@@ -259,16 +260,25 @@ function insertChunkBeforeIEND(originalPng, newChunk) {
         throw new Error('PNG missing IEND chunk');
     }
 
-    // Calculate new file size
     const iendChunk = chunks[iendIndex];
-    const beforeIEND = originalPng.slice(0, iendChunk.offset);
-    const iendData = originalPng.slice(iendChunk.offset);
+    const parts = [originalPng.subarray(0, 8)];
+    for (const chunk of chunks.slice(0, iendIndex)) {
+        if (chunk.type === 'tEXt' || chunk.type === 'zTXt') {
+            const separator = chunk.data.indexOf(0);
+            if (separator >= 0 && new TextDecoder().decode(chunk.data.subarray(0, separator)) === VectFox_KEYWORD) {
+                continue;
+            }
+        }
+        parts.push(originalPng.subarray(chunk.offset, chunk.offset + chunk.data.length + 12));
+    }
+    parts.push(newChunk, originalPng.subarray(iendChunk.offset));
 
-    // Combine: original (minus IEND) + new chunk + IEND
-    const result = new Uint8Array(beforeIEND.length + newChunk.length + iendData.length);
-    result.set(beforeIEND, 0);
-    result.set(newChunk, beforeIEND.length);
-    result.set(iendData, beforeIEND.length + newChunk.length);
+    const result = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
+    let offset = 0;
+    for (const part of parts) {
+        result.set(part, offset);
+        offset += part.length;
+    }
 
     return result;
 }
@@ -568,7 +578,7 @@ export async function isVectFoxPNG(file) {
     try {
         const data = await readPNGFile(file);
         const exportData = await extractDataFromPNG(data);
-        return exportData !== null && (exportData.generator === 'VectFox' || exportData.version);
+        return Boolean(exportData !== null && (exportData.generator === 'VectFox' || exportData.version));
     } catch {
         return false;
     }

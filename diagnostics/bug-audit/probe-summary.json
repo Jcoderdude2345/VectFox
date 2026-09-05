@@ -1,0 +1,34 @@
+[
+  {
+    "mode": "baseline",
+    "result": "12 failed | 318 skipped (330)"
+  },
+  {
+    "mode": "chunking",
+    "result": "11 failed | 1 passed | 318 skipped (330)"
+  },
+  {
+    "mode": "empty-window",
+    "result": "11 failed | 1 passed | 318 skipped (330)"
+  },
+  {
+    "mode": "scores",
+    "result": "11 failed | 1 passed | 318 skipped (330)"
+  },
+  {
+    "mode": "cache",
+    "result": "10 failed | 2 passed | 318 skipped (330)"
+  },
+  {
+    "mode": "boolean",
+    "result": "10 failed | 2 passed | 318 skipped (330)"
+  },
+  {
+    "mode": "prompt-keys",
+    "result": "9 failed | 3 passed | 318 skipped (330)"
+  },
+  {
+    "mode": "png-replace",
+    "result": "11 failed | 1 passed | 318 skipped (330)"
+  }
+]

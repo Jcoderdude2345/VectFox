@@ -323,20 +323,16 @@ describe('planner LLM call', () => {
         expect(system.content).toContain('You are a retrieval planner');
         expect(user.role).toBe('user');
         expect(user.content).toContain('what happened at the docks?');
-        expect(user.content).toContain('E1 [—] event — pre-search hit');
+        expect(user.content).toContain('E1 [0.80] event — pre-search hit');
     });
 
-    it('shows pre-search candidate scores as "—" because _finalScore is not a field the formatter reads', async () => {
-        // BUG-SHAPED: retrieveEvents ranks with `_finalScore`, and this module
-        // reads `_finalScore` for its OWN debug line — but
-        // _formatCandidateLine() only looks at `score` / `vectorScore`. The
-        // planner therefore gets no relevance signal for any candidate.
+    it('includes the final retrieval score in planner candidates', async () => {
         retrieveEvents.mockResolvedValue(preSearchResult([
             { event_id: 'e1', text: 'ranked hit', _finalScore: 0.93 },
         ]));
         globalThis.fetch.mockResolvedValue(plannerReply({ queries: ['q one'] }));
         await retrieveEventsWithAgent(params());
-        expect(lastPlannerBody().messages[1].content).toContain('E1 [—]');
+        expect(lastPlannerBody().messages[1].content).toContain('E1 [0.93]');
     });
 
     it('does show a score when the candidate carries a plain `score` field', async () => {

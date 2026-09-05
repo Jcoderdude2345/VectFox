@@ -107,20 +107,25 @@ describe('excerpt and prompt construction', () => {
         expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
-    it('STILL calls the LLM for a window of empty messages — the empty-window guard is defeated by speaker labels', async () => {
-        // BUG-SHAPED: the guard is `if (!excerptText.trim())`, but excerptText
-        // is built as `${speaker}: ${text}`. With any named speaker the string
-        // is "A: \n\nB: ", which trims to "A:\n\nB:" — non-empty. So a window
-        // of blank messages burns a full LLM call instead of short-circuiting.
+    it('skips named blank messages without calling the LLM', async () => {
         await run({ messages: [{ name: 'A', mes: '' }, { name: 'B', mes: '   ' }] });
-        expect(globalThis.fetch).toHaveBeenCalledOnce();
-        expect(lastPrompt()).toContain('A: \n\nB:');
+        expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
-    it('does short-circuit when the messages have neither text NOR a usable label... it does not', async () => {
-        // Even an unnamed, empty, non-user message renders as "Assistant: ".
+    it('skips messages without text or a label', async () => {
         await run({ messages: [{}] });
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('counts kana once when deciding whether to add a language hint', async () => {
+        await run({ messages: [{ name: 'A', mes: 'あabcdefghij' }] });
+        expect(lastPrompt()).not.toContain('DETECTED EXCERPT LANGUAGE');
+    });
+
+    it('keeps nonempty content when other messages in the window are blank', async () => {
+        await run({ messages: [{ name: 'A', mes: '' }, { name: 'B', mes: 'We agreed to leave.' }] });
         expect(globalThis.fetch).toHaveBeenCalledOnce();
+        expect(lastPrompt()).toContain('B: We agreed to leave.');
     });
 
     it('formats the excerpt as "Speaker: text" blocks separated by blank lines', async () => {

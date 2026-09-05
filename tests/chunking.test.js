@@ -313,14 +313,9 @@ describe('section strategy', () => {
         expect(out.map(c => c.text)).toEqual(['intro text', '# Heading\nbody']);
     });
 
-    it('returns header-less text as ONE chunk — the paragraph fallback is dead code', async () => {
-        // BUG-SHAPED: the `if (sections.length === 0) return paragraph(...)`
-        // branch can never run. With no headers the while loop never executes,
-        // so `lastIndex (0) < text.length` always pushes the whole text as a
-        // single section, making sections.length === 1. Header-less documents
-        // are therefore NOT split at all, contrary to the code's intent.
+    it('falls back to paragraphs when no section headers exist', async () => {
         const out = await chunkText('alpha\n\nbeta', { strategy: 'section' });
-        expect(out.map(c => c.text)).toEqual(['alpha\n\nbeta']);
+        expect(out.map(c => c.text)).toEqual(['alpha', 'beta']);
         expect(out[0].metadata.strategy).toBe('section');
     });
 
