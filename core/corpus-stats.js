@@ -27,7 +27,7 @@
  * ============================================================================
  */
 import { getRequestHeaders } from '../../../../../script.js';
-import { extension_settings } from '../../../../extensions.js';
+import '../../../../extensions.js';
 import { tokenize } from './bm25-scorer.js';
 import { getModelFromSettings } from './providers.js';
 import { log } from './log.js';

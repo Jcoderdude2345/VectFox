@@ -15,11 +15,9 @@ import { getOpenRouterApiKey, getCustomApiKey } from './api-keys.js';
 import { callChatCompletion, extractReply, errorBodyText } from './llm-transport.js';
 import { getModelConfigErrorMessage } from './model-http-errors.js';
 import {
-    EVENT_TYPES,
     EventBaseExtractionError,
     EventBaseFatalError,
     validateEvent,
-    buildEmbedText,
     buildExtractionPrompt,
     EVENTBASE_SCHEMA_VERSION,
 } from './eventbase-schema.js';

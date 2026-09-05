@@ -24,9 +24,9 @@ import { debounce_timeout } from '../../../constants.js';
 
 // VectFox modules - Core
 import { synchronizeChat, rearrangeChat, vectorizeAll } from './core/chat-vectorization.js';
-import { purgeAllVectorIndexes, purgeVectorIndex } from './core/core-vector-api.js';
+import './core/core-vector-api.js';
 import { migrateOldEnabledKeys } from './core/collection-metadata.js';
-import { clearCollectionRegistry, discoverExistingCollections, cleanupCorruptedCollections } from './core/collection-loader.js';
+import { discoverExistingCollections, cleanupCorruptedCollections } from './core/collection-loader.js';
 import { migrateLegacyApiKeys } from './core/api-keys.js';
 import AsyncUtils from './utils/async-utils.js';
 

@@ -11,7 +11,7 @@
 
 import { extension_settings, getContext } from '../../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../../script.js';
-import { parseRegistryKey, COLLECTION_PREFIXES, parseCollectionId } from './collection-ids.js';
+import { parseRegistryKey, parseCollectionId } from './collection-ids.js';
 import { log } from './log.js';
 
 // ============================================================================

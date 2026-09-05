@@ -9,7 +9,7 @@
  * ============================================================================
  */
 
-import { getSavedHashes } from '../core/core-vector-api.js';
+import '../core/core-vector-api.js';
 import { VALID_EMOTIONS, VALID_GENERATION_TYPES, validateConditionRule } from '../core/conditional-activation.js';
 import { isCollectionEnabled } from '../core/collection-metadata.js';
 import { getCollectionRegistry } from '../core/collection-loader.js';

@@ -23,7 +23,7 @@
  */
 
 import { getRequestHeaders } from '../../../../../script.js';
-import { extension_settings, modules } from '../../../../extensions.js';
+import { modules } from '../../../../extensions.js';
 import { secret_state } from '../../../../secrets.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../../textgen-settings.js';
 // Embedding-side: no key helpers needed here. vLLM, Ollama, and other
@@ -31,19 +31,18 @@ import { textgen_types, textgenerationwebui_settings } from '../../../../textgen
 // (vLLM → SECRET_KEYS.VLLM) or send no auth at all (Ollama — ST has no
 // auth path for it). Cloud providers like OpenRouter route through ST's
 // chat-completions proxy from elsewhere, not through this file.
-import { oai_settings } from '../../../../openai.js';
+import '../../../../openai.js';
 import { isWebLlmSupported } from '../../../shared.js';
 import { getWebLlmProvider } from '../providers/webllm.js';
 import { getBackend, getBackendForCollection, invalidateBackendHealth, recordQuery, recordInsert, recordDelete, recordError } from '../backends/backend-manager.js';
-import { parseRegistryKey, resolveBackendForCollection, getRegistryBackend } from './collection-ids.js';
+import { resolveBackendForCollection, getRegistryBackend } from './collection-ids.js';
 import {
     getProviderConfig,
     getModelField,
     getModelFromSettings,
     getSecretKey,
     requiresApiKey,
-    requiresUrl,
-    getUrlProviders
+    requiresUrl
 } from './providers.js';
 import { getOverfetchAmount } from './keyword-boost.js';
 import { applyBM25Scoring, porterStemmer } from './bm25-scorer.js';
@@ -116,9 +115,6 @@ function _invalidateSavedHashesMetaCache(collectionId, reason) {
 import AsyncUtils from '../utils/async-utils.js';
 import StringUtils from '../utils/string-utils.js';
 import {
-    RATE_LIMIT_CALLS,
-    RATE_LIMIT_WINDOW_MS,
-    API_TIMEOUT_MS,
     RETRY_MAX_ATTEMPTS,
     RETRY_INITIAL_DELAY_MS,
     RETRY_MAX_DELAY_MS,
@@ -439,239 +435,9 @@ export function getVectorsRequestBody(args = {}, settings) {
 export async function getAdditionalArgs(items, settings, onProgress = null) {
     const args = {};
     switch (settings.source) {
-        // case 'webllm': args.embeddings = await createWebLlmEmbeddings(items, settings); break;
-        // case 'koboldcpp': { const { embeddings, model } = await createKoboldCppEmbeddings(items, settings, onProgress); args.embeddings = embeddings; args.model = model; break; }
-        // case 'bananabread': { const { embeddings, model } = await createBananaBreadEmbeddings(items, settings); args.embeddings = embeddings; args.model = model; break; }
+        // No client-side embedding providers are currently dispatched here.
     }
     return args;
-}
-
-/**
- * Creates WebLLM embeddings for a list of items.
- * Wrapped with retry and timeout for robustness.
- * @param {string[]} items Items to embed
- * @param {object} settings VectFox settings object
- * @returns {Promise<Record<string, number[]>>} Calculated embeddings
- */
-async function createWebLlmEmbeddings(items, settings) {
-    if (items.length === 0) {
-        return /** @type {Record<string, number[]>} */ ({});
-    }
-
-    if (!isWebLlmSupported()) {
-        throw new Error('VectFox: WebLLM is not supported', { cause: 'webllm_not_supported' });
-    }
-
-    // Clean text before embedding
-    const cleanedItems = items.map(item => stripFormatting(item) || item);
-
-    return await AsyncUtils.retry(async () => {
-        const embedPromise = webllmProvider.embedTexts(cleanedItems, settings.webllm_model);
-        const embeddings = await AsyncUtils.timeout(embedPromise, API_TIMEOUT_MS * 2, 'WebLLM embedding request timed out');
-
-        const result = /** @type {Record<string, number[]>} */ ({});
-        for (let i = 0; i < items.length; i++) {
-            // Map back to original items for hash consistency
-            result[items[i]] = embeddings[i];
-        }
-        return result;
-    }, {
-        ...RETRY_CONFIG,
-        onRetry: (attempt, error) => {
-            log.warn(`VectFox: WebLLM embedding retry ${attempt} - ${error.message}`);
-        }
-    });
-}
-
-/**
- * Creates KoboldCpp embeddings for a list of items.
- * Wrapped with retry and rate limiting for robustness.
- * @param {string[]} items Items to embed
- * @param {object} settings VectFox settings object
- * @param {Function} onProgress - Optional callback (embedded, total) => void for progress updates
- * @returns {Promise<{embeddings: Record<string, number[]>, model: string}>} Calculated embeddings
- */
-async function createKoboldCppEmbeddings(items, settings, onProgress = null) {
-    // Clean text before embedding (strip HTML/Markdown)
-    const cleanedItems = items.map(item => stripFormatting(item) || item);
-
-    // Batch size for progress tracking
-    const BATCH_SIZE = 10;
-    const allEmbeddings = /** @type {Record<string, number[]>} */ ({});
-    let modelName = 'koboldcpp';
-
-    // Process in batches to show progress
-    for (let i = 0; i < cleanedItems.length; i += BATCH_SIZE) {
-        const batchItems = cleanedItems.slice(i, Math.min(i + BATCH_SIZE, cleanedItems.length));
-        const originalBatchItems = items.slice(i, Math.min(i + BATCH_SIZE, items.length));
-
-        const result = await dynamicRateLimiter.execute(async () => {
-            return await AsyncUtils.retry(async () => {
-                const serverUrl = settings.use_alt_endpoint ? settings.alt_endpoint_url : textgenerationwebui_settings.server_urls[textgen_types.KOBOLDCPP];
-                if (!serverUrl) {
-                    throw new Error('KoboldCpp URL not found');
-                }
-
-                const cleanUrl = serverUrl.replace(/\/$/, '');
-                const response = await fetch(`${cleanUrl}/v1/embeddings`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        input: batchItems,
-                        model: settings.koboldcpp_model || 'koboldcpp',
-                    }),
-                });
-
-                if (!response.ok) {
-                    // Try legacy endpoint if v1 fails (fallback)
-                    if (response.status === 404) {
-                        log.warn('VectFox: KoboldCpp /v1/embeddings not found, trying legacy endpoint...');
-                        // Fallthrough to retry or handle legacy?
-                        // Better to throw specific error so we can potentially retry with legacy logic if we wanted,
-                        // but for now let's stick to the directive of using OpenAI compatible endpoint.
-                    }
-                    throw new Error(`Failed to get KoboldCpp embeddings: ${response.status} ${response.statusText}`);
-                }
-
-                const data = await response.json();
-
-                // OpenAI format: { data: [{ embedding: [], index: 0, ... }, ...], model: "..." }
-                if (!data.data || !Array.isArray(data.data) || data.data.length !== batchItems.length) {
-                     throw new Error('Invalid response from KoboldCpp embeddings (OpenAI format)');
-                }
-
-                // Sort by index to ensure order matches items
-                data.data.sort((a, b) => a.index - b.index);
-
-                const batchEmbeddings = {};
-                for (let j = 0; j < data.data.length; j++) {
-                    const embedding = data.data[j].embedding;
-                    if (!Array.isArray(embedding) || embedding.length === 0) {
-                        throw new Error('KoboldCpp returned an empty embedding.');
-                    }
-                    // Map back to original items (not cleaned) for hash consistency
-                    batchEmbeddings[originalBatchItems[j]] = embedding;
-                }
-
-                return {
-                    embeddings: batchEmbeddings,
-                    model: data.model || 'koboldcpp',
-                };
-            }, {
-                ...RETRY_CONFIG,
-                onRetry: (attempt, error) => {
-                    log.warn(`VectFox: KoboldCpp embedding retry ${attempt} - ${error.message}`);
-                }
-            });
-        }, settings);
-
-        // Merge batch embeddings into all embeddings
-        Object.assign(allEmbeddings, result.embeddings);
-        modelName = result.model;
-
-        // Call progress callback after each batch
-        const embeddedSoFar = Math.min(i + BATCH_SIZE, items.length);
-        if (onProgress) {
-            log.verbose(`[KoboldCpp] Calling progress callback: ${embeddedSoFar}/${items.length}`);
-            onProgress(embeddedSoFar, items.length);
-        }
-    }
-
-    return {
-        embeddings: allEmbeddings,
-        model: modelName,
-    };
-}
-
-/**
- * Creates BananaBread embeddings for a list of items.
- * Wrapped with retry, timeout, and rate limiting for robustness.
- * @param {string[]} items Items to embed
- * @param {object} settings VectFox settings object
- * @returns {Promise<{embeddings: number[][], model: string}>} Calculated embeddings as array (index-aligned with input items)
- */
-async function createBananaBreadEmbeddings(items, settings) {
-    // Clean text before embedding (strip HTML/Markdown & Handle mixed types: strings vs objects)
-    // Note: Must preserve 1:1 mapping with input items, so we replace empty strings with space instead of filtering
-    const cleanedItems = items.map(item => {
-        let text = '';
-        // 1. Handle primitive strings
-        if (typeof item === 'string') {
-            text = stripFormatting(item) || item;
-        }
-        // 2. Handle objects: Extract known text fields (e.g., item.text, item.content)
-        else if (item && typeof item === 'object') {
-            const textValue = item.text || item.content || '';
-            text = stripFormatting(textValue) || textValue;
-        }
-
-        // 3. Fallback for unexpected types or empty result
-        return text.length > 0 ? text : ' ';
-    });
-
-    return await dynamicRateLimiter.execute(async () => {
-        return await AsyncUtils.retry(async () => {
-            const serverUrl = settings.use_alt_endpoint ? settings.alt_endpoint_url : 'http://localhost:8008';
-            const cleanUrl = serverUrl.replace(/\/$/, '');
-
-            const headers = {
-                'Content-Type': 'application/json',
-            };
-
-            // Use extension settings for API key (custom keys aren't returned by ST's readSecretState)
-            if (settings.bananabread_api_key) {
-                headers['Authorization'] = `Bearer ${settings.bananabread_api_key}`;
-            }
-
-            const fetchPromise = fetch(`${cleanUrl}/v1/embeddings`, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify({
-                    input: cleanedItems,
-                    model: settings.bananabread_model || 'bananabread',
-                }),
-            });
-
-            const response = await AsyncUtils.timeout(fetchPromise, API_TIMEOUT_MS * 20, 'BananaBread embedding request timed out');
-
-            if (!response.ok) {
-                throw new Error(`Failed to get BananaBread embeddings: ${response.status} ${response.statusText}`);
-            }
-
-            const data = await response.json();
-
-            // OpenAI format: { data: [{ embedding: [], index: 0, ... }, ...], model: "..." }
-            if (!data.data || !Array.isArray(data.data) || data.data.length !== cleanedItems.length) {
-                throw new Error(`Invalid response from BananaBread embeddings (OpenAI format): expected ${cleanedItems.length} embeddings, got ${data.data?.length || 0}`);
-            }
-
-            // Sort by index to ensure order matches input items
-            data.data.sort((a, b) => a.index - b.index);
-
-            // Build map of embeddings keyed by original item text
-            const embeddings = /** @type {Record<string, number[]>} */ ({});
-            for (let i = 0; i < data.data.length; i++) {
-                const embedding = data.data[i].embedding;
-                if (!Array.isArray(embedding) || embedding.length === 0) {
-                    throw new Error(`BananaBread returned an empty or invalid embedding at index ${i}.`);
-                }
-                // Map back to original items for hash consistency/lookup
-                embeddings[items[i]] = embedding;
-            }
-
-            return {
-                embeddings: embeddings,
-                model: data.model || 'bananabread',
-            };
-        }, {
-            ...RETRY_CONFIG,
-            onRetry: (attempt, error) => {
-                log.warn(`VectFox: BananaBread embedding retry ${attempt} - ${error.message}`);
-            }
-        });
-    }, settings);
 }
 
 /**

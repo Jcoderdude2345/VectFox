@@ -14,7 +14,6 @@ import {
     deleteVectorItems,
     insertVectorItems,
     getSavedHashes,
-    queryCollection,
     purgeVectorIndex,
 } from '../core/core-vector-api.js';
 import {

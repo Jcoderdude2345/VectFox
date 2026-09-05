@@ -29,7 +29,7 @@ import { getRequestHeaders } from '../../../../../script.js';
 import { VectorBackend } from './backend-interface.js';
 import { getModelFromSettings } from '../core/providers.js';
 import { throwIfModelConfigError } from '../core/model-http-errors.js';
-import { VECTOR_LIST_LIMIT } from '../core/constants.js';
+import '../core/constants.js';
 import { INTERNAL_COLLECTION_IDS } from '../core/collection-ids.js';
 import { extension_settings } from '../../../../extensions.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../../textgen-settings.js';

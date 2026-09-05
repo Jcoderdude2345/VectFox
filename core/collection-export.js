@@ -17,7 +17,7 @@
  * ============================================================================
  */
 
-import { extension_settings } from '../../../../extensions.js';
+import '../../../../extensions.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../../script.js';
 import { getSavedHashes, insertVectorItems, purgeVectorIndex, clearSavedHashesMetaCache } from './core-vector-api.js';
 import {
@@ -25,15 +25,13 @@ import {
     setCollectionMeta,
     getChunkMetadata,
     saveChunkMetadata,
-    getAllChunkMetadata,
     clearCollectionLock,
     getEffectiveScope,
 } from './collection-metadata.js';
 import {
     registerCollection,
-    getCollectionRegistry,
 } from './collection-loader.js';
-import { COLLECTION_PREFIXES, buildRegistryKey, parseCollectionId, normalizeBackendForId, remapCollectionIdToBackend, getRegistryBackend } from './collection-ids.js';
+import { buildRegistryKey, normalizeBackendForId, remapCollectionIdToBackend, getRegistryBackend } from './collection-ids.js';
 import { getModelFromSettings } from './providers.js';
 import { encodeSparseVector } from './sparse-vector-encoder.js';
 import { progressTracker } from '../ui/progress-tracker.js';

@@ -20,7 +20,7 @@ import { getOpenRouterApiKey, getCustomApiKey } from './api-keys.js';
 import { getDefaultSummarizePrompt } from './prompts-i18n.js';
 import { getModelConfigErrorMessage } from './model-http-errors.js';
 import { callChatCompletion, extractReply, errorBodyText } from './llm-transport.js';
-import { log } from './log.js';
+import './log.js';
 
 /**
  * Fatal summarization error that should abort vectorization instead of silently

@@ -12,7 +12,7 @@
 import { getRequestHeaders } from '../../../../../script.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../../textgen-settings.js';
 import { getSavedHashes, purgeVectorIndex } from '../core/core-vector-api.js';
-import { getModelField, getModelFromSettings, getProviderConfig } from '../core/providers.js';
+import { getModelFromSettings } from '../core/providers.js';
 import { unregisterCollection } from '../core/collection-loader.js';
 import { reciprocalRankFusion, weightedCombination } from '../core/hybrid-search.js';
 import { extractTextKeywords, extractLorebookKeywords } from '../core/keyword-boost.js';
@@ -111,30 +111,6 @@ export async function sweepLeftoverTestCollections(settings) {
             category: 'infrastructure'
         };
     }
-}
-
-/**
- * Helper: Get provider-specific body parameters for native ST vector API
- */
-function getProviderBody(settings) {
-    const body = {};
-    const source = settings.source;
-    const modelField = getModelField(source);
-
-    if (modelField && settings[modelField]) {
-        body.model = settings[modelField];
-    }
-
-    // Google APIs need special handling
-    if (source === 'palm') {
-        body.api = 'makersuite';
-        body.model = settings.google_model;
-    } else if (source === 'vertexai') {
-        body.api = 'vertexai';
-        body.model = settings.google_model;
-    }
-
-    return body;
 }
 
 /**

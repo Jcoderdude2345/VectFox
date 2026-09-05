@@ -11,17 +11,12 @@
  */
 
 import {
-    CONTENT_TYPES,
-    CHUNKING_STRATEGIES,
     getContentType,
     getAllContentTypes,
     getChunkingStrategies,
     getChunkingStrategy,
-    strategyNeedsSize,
-    strategyNeedsOverlap,
     getContentTypeDefaults,
     hasFeature,
-    SCOPE_OPTIONS,
     CHARACTER_FIELDS,
 } from '../core/content-types.js';
 import { extension_settings, getContext } from '../../../../extensions.js';
@@ -41,7 +36,6 @@ import { isFatbodyOwnedBook } from '../core/fatbody-guard.js';
 import {
     WikiScrapeError,
     shouldFallbackToPlugin,
-    regexFromString,
     buildApiCandidates,
     resolveE621Base,
 } from '../core/wiki-scraper.js';

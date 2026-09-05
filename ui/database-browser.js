@@ -13,8 +13,6 @@
 import {
   loadAllCollections,
   setCollectionEnabled,
-  registerCollection,
-  unregisterCollection,
   clearCollectionRegistry,
   deleteCollection,
   sanitizeHandleId,
@@ -23,34 +21,26 @@ import {
 } from "../core/collection-loader.js";
 import { COLLECTION_PREFIXES } from "../core/collection-ids.js";
 import {
-  purgeVectorIndex,
   queryMultipleCollections,
 } from "../core/core-vector-api.js";
 import { getRequestHeaders, getCurrentChatId, eventSource, event_types } from "../../../../../script.js";
 import {
   cleanupOrphanedMeta,
-  deleteCollectionMeta,
   getCollectionConditions,
   setCollectionConditions,
   getCollectionTriggers,
-  setCollectionTriggers,
   getCollectionMeta,
   setCollectionMeta,
   getCollectionActivationSummary,
-  isCollectionEnabled,
-  // Locking API
-  getCollectionLock,
   getCollectionLocks,
   setCollectionLock,
   removeCollectionLock,
-  clearCollectionLock,
   isCollectionLockedToChat,
   getCollectionLockCount,
   // Character Locking API
   getCollectionCharacterLocks,
   setCollectionCharacterLock,
   removeCollectionCharacterLock,
-  clearCollectionCharacterLocks,
   isCollectionLockedToCharacter,
   getCollectionCharacterLockCount,
   isCollectionActiveForContext,
@@ -65,7 +55,7 @@ import { world_names, loadWorldInfo } from "../../../../world-info.js";
 import { icons } from "./icons.js";
 import StringUtils from "../utils/string-utils.js";
 import { openVisualizer } from "./chunk-visualizer.js";
-import { queryCollection } from "../core/core-vector-api.js";
+import "../core/core-vector-api.js";
 import {
   exportCollection,
   importCollection,
@@ -81,7 +71,6 @@ import {
   downloadPNG,
   readPNGFile,
   convertToPNG,
-  isVectFoxPNG,
 } from "../core/png-export.js";
 import { renderSizeInspectorTab } from "./size-inspector.js";
 

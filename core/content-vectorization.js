@@ -10,7 +10,7 @@
  * ============================================================================
  */
 
-import { getContentType, getContentTypeDefaults, hasFeature } from './content-types.js';
+import { getContentType, getContentTypeDefaults } from './content-types.js';
 import { chunkText } from './chunking.js';
 import { insertVectorItems, getSavedHashes } from './core-vector-api.js';
 import { setCollectionMeta, setCollectionLock, setCollectionCharacterLock, saveChunkMetadata } from './collection-metadata.js';
@@ -21,12 +21,11 @@ import {
     buildLorebookCollectionId,
     buildCharacterCollectionId,
     buildDocumentCollectionId,
-    COLLECTION_PREFIXES,
     buildRegistryKey,
     getBackendFromCollectionId,
 } from './collection-ids.js';
-import { extractLorebookKeywords, extractTextKeywords, extractChatKeywords, extractBM25Keywords, EXTRACTION_LEVELS, DEFAULT_EXTRACTION_LEVEL, DEFAULT_BASE_WEIGHT, dedupeKeywordsByStem } from './keyword-boost.js';
-import { cleanText, cleanContentOrNull, cleanWikiNoise } from './text-cleaning.js';
+import { extractLorebookKeywords, extractTextKeywords, extractBM25Keywords, dedupeKeywordsByStem } from './keyword-boost.js';
+import { cleanContentOrNull, cleanWikiNoise } from './text-cleaning.js';
 import { prepareLorebookContent } from './lorebook-content-preparer.js';
 import { extractGlossary, injectGlossary } from './glossary-extractor.js';
 import { getReformatCache, recordReformatVectorization } from './reformat-store.js';
