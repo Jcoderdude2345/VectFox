@@ -24,7 +24,7 @@ import { getOpenRouterApiKey, getCustomApiKey } from './api-keys.js';
 import { callChatCompletion, extractReply, errorBodyText } from './llm-transport.js';
 import { getModelConfigErrorMessage } from './model-http-errors.js';
 import { chunkText } from './chunking.js';
-import AsyncUtils from '../utils/async-utils.js';
+import { createReformatExecution } from './reformat-run.js';
 import {
     ReformatExtractionError,
     ReformatFatalError,
@@ -79,7 +79,7 @@ function _resolveVllmUrl(settings) {
  * @param {number} batchIndex
  * @returns {Promise<{reply: string, finishReason: string|null}>}
  */
-async function _callOpenRouter(prompt, settings, batchIndex) {
+async function _callOpenRouter(prompt, settings, batchIndex, signal) {
     const apiKey = getOpenRouterApiKey(settings);
     if (!apiKey) {
         throw new ReformatFatalError(
@@ -107,6 +107,7 @@ async function _callOpenRouter(prompt, settings, batchIndex) {
         maxTokens,
         temperature,
         timeoutMs,
+        signal,
     });
 
     if (!result.ok) {
@@ -142,7 +143,7 @@ async function _callOpenRouter(prompt, settings, batchIndex) {
  * @param {number} batchIndex
  * @returns {Promise<{reply: string, finishReason: string|null}>}
  */
-async function _callVLLM(prompt, settings, batchIndex) {
+async function _callVLLM(prompt, settings, batchIndex, signal) {
     const baseUrl = _resolveVllmUrl(settings);
     if (!baseUrl) {
         throw new ReformatFatalError(
@@ -179,6 +180,7 @@ async function _callVLLM(prompt, settings, batchIndex) {
         maxTokens,
         temperature,
         timeoutMs,
+        signal,
     });
 
     if (!result.ok) {
@@ -213,14 +215,10 @@ async function _callVLLM(prompt, settings, batchIndex) {
  * 5xx, timeouts) but never retrying ReformatFatalError (auth/config problems
  * a retry can't fix).
  */
-async function _callProviderWithRetry(prompt, settings, batchIndex) {
+async function _callProviderWithRetry(prompt, settings, batchIndex, execution) {
     const provider = _resolveProvider(settings);
     const callFn = provider === 'vllm' ? _callVLLM : _callOpenRouter;
-    return AsyncUtils.retry(() => callFn(prompt, settings, batchIndex), {
-        maxAttempts: 3,
-        delay: 1500,
-        maxDelay: 10000,
-        backoffFactor: 2,
+    return execution.retry(signal => callFn(prompt, settings, batchIndex, signal), {
         shouldRetry: (err) => !(err instanceof ReformatFatalError),
         onRetry: (attempt, err) => log.warn(`[Auto-Reformat] Batch ${batchIndex}: attempt ${attempt} failed (${err?.message || err}), retrying...`),
     });
@@ -501,7 +499,7 @@ function _ingestReply(reply, batch, { results, alreadyExtractedNames, settings, 
  * cover specifically what it dropped. Repair failures are non-fatal, same
  * policy as batch failures.
  */
-async function _processChain(chain, settings, chainIndex, warnings) {
+async function _processChain(chain, settings, chainIndex, warnings, execution) {
     const results = [];
     let failedCount = 0;
     let repairCalls = 0;
@@ -510,6 +508,7 @@ async function _processChain(chain, settings, chainIndex, warnings) {
     const coverageThreshold = settings.reformat_coverage_threshold ?? DEFAULT_COVERAGE_THRESHOLD;
 
     for (let i = 0; i < chain.length; i++) {
+        execution.check();
         const batch = chain[i];
         const batchLabel = chain.length > 1 ? `chain ${chainIndex} part ${i + 1}/${chain.length}` : `batch ${chainIndex}`;
         const batchContext = batch.continuation
@@ -518,13 +517,14 @@ async function _processChain(chain, settings, chainIndex, warnings) {
         const prompt = buildReformatPrompt(batch.text, { customPrompt: settings.reformat_custom_prompt, batchContext });
 
         try {
-            const { reply, finishReason } = await _callProviderWithRetry(prompt, settings, chainIndex);
+            const { reply, finishReason } = await _callProviderWithRetry(prompt, settings, chainIndex, execution);
             if (finishReason === 'length') {
                 warnings.push(`${batchLabel}: response was truncated by the model's output limit — some entries from this section may be missing. Consider lowering "Batch size (chars)" in Auto-Reformat settings.`);
             }
 
             _ingestReply(reply, batch, { results, alreadyExtractedNames, settings, chainIndex, batchLabel });
         } catch (err) {
+            execution.check();
             if (err instanceof ReformatFatalError) throw err;
             failedCount++;
             warnings.push(`${batchLabel} failed: ${err?.message || err} — skipped, other batches continue.`);
@@ -543,7 +543,7 @@ async function _processChain(chain, settings, chainIndex, warnings) {
                 customPrompt: settings.reformat_custom_prompt,
                 alreadyExtractedNames: [...alreadyExtractedNames],
             });
-            const { reply: repairReply } = await _callProviderWithRetry(repairPrompt, settings, chainIndex);
+            const { reply: repairReply } = await _callProviderWithRetry(repairPrompt, settings, chainIndex, execution);
             repairCalls++;
             const added = _ingestReply(repairReply, batch, { results, alreadyExtractedNames, settings, chainIndex, batchLabel: `${batchLabel} (repair)` });
             log.lifecycle(`[Auto-Reformat] ${batchLabel}: repair call added ${added} record(s)`);
@@ -553,6 +553,7 @@ async function _processChain(chain, settings, chainIndex, warnings) {
                 warnings.push(`${batchLabel}: section(s) still under-captured after a repair pass: ${stillFlagged.map(s => `"${s.title}"`).join(', ')} — review these entries for missing detail.`);
             }
         } catch (err) {
+            execution.check();
             if (err instanceof ReformatFatalError) throw err;
             warnings.push(`${batchLabel}: repair call for under-captured section(s) ${flaggedTitles} failed: ${err?.message || err} — the original extraction is kept.`);
             log.warn(`[Auto-Reformat] ${batchLabel} repair call failed:`, err?.message || err);
@@ -744,7 +745,7 @@ export function mergeDuplicateEntities(chunks) {
  * @param {(() => void)|null} params.onTick - Called once per finished link batch (progress)
  * @returns {Promise<{applied: number, dropped: number}>}
  */
-async function _runLinkingPass({ batches, records, settings, warnings, concurrency, abortSignal = null, onTick = null }) {
+async function _runLinkingPass({ batches, records, settings, warnings, concurrency, execution, abortSignal = null, onTick = null }) {
     const catalog = records.map(r => ({ name: r.name, entry_type: r.entry_type, aliases: r.aliases || [] }));
 
     /** @type {Map<string, object>} lowercased name/alias → record (first registration wins) */
@@ -766,7 +767,7 @@ async function _runLinkingPass({ batches, records, settings, warnings, concurren
         }
         try {
             const prompt = buildLinkingPrompt(batch.text, catalog);
-            const { reply } = await _callProviderWithRetry(prompt, settings, i);
+            const { reply } = await _callProviderWithRetry(prompt, settings, i, execution);
             const triples = _parseReformatArray(reply, i, ['source', 'target']);
 
             for (const t of triples) {
@@ -785,14 +786,16 @@ async function _runLinkingPass({ batches, records, settings, warnings, concurren
                 applied++;
             }
         } catch (err) {
+            execution.check();
             if (err instanceof ReformatFatalError || err?.name === 'AbortError') throw err;
             warnings.push(`Linking pass, batch ${i}: ${err?.message || err} — skipped, extraction results are unaffected.`);
             log.warn(`[Auto-Reformat] Linking pass batch ${i} failed:`, err?.message || err);
         }
+        execution.check();
         onTick?.();
     });
 
-    await AsyncUtils.parallel(linkFns, concurrency);
+    await execution.parallel(linkFns, concurrency);
     log.lifecycle(`[Auto-Reformat] Linking pass: ${applied} relationship(s) added, ${dropped} unresolvable triple(s) dropped`);
     return { applied, dropped };
 }
@@ -817,6 +820,8 @@ async function _runLinkingPass({ batches, records, settings, warnings, concurren
  * @returns {Promise<{chunks: object[], warnings: string[], batchesProcessed: number, batchesFailed: number, totalBatches: number}>}
  */
 export async function reformatDocument({ text, contentType, settings, onProgress = null, abortSignal = null } = {}) {
+    const execution = createReformatExecution(abortSignal);
+    execution.check();
     if (!text || typeof text !== 'string' || !text.trim()) {
         return { chunks: [], warnings: ['No text to reformat.'], batchesProcessed: 0, batchesFailed: 0, totalBatches: 0 };
     }
@@ -845,7 +850,8 @@ export async function reformatDocument({ text, contentType, settings, onProgress
             err.name = 'AbortError';
             throw err;
         }
-        const { results, failedCount, repairCalls } = await _processChain(chain, settings, chainIndex, warnings);
+        const { results, failedCount, repairCalls } = await _processChain(chain, settings, chainIndex, warnings, execution);
+        execution.check();
         batchesProcessed += chain.length;
         batchesFailed += failedCount;
         totalRepairCalls += repairCalls;
@@ -853,7 +859,7 @@ export async function reformatDocument({ text, contentType, settings, onProgress
         return results;
     });
 
-    const chainResultsArrays = await AsyncUtils.parallel(chainFns, concurrency);
+    const chainResultsArrays = await execution.parallel(chainFns, concurrency);
     const rawChunks = chainResultsArrays.flat();
 
     // Chains run in parallel with no cross-chain visibility, so the same entity
@@ -873,6 +879,7 @@ export async function reformatDocument({ text, contentType, settings, onProgress
             warnings,
             concurrency,
             abortSignal,
+            execution,
             onTick: () => {
                 linkBatchesDone++;
                 onProgress?.(linkBatchesDone, totalBatches, 'link');
@@ -882,6 +889,7 @@ export async function reformatDocument({ text, contentType, settings, onProgress
 
     log.lifecycle(`[Auto-Reformat] Complete: ${chunks.length} entries extracted from ${totalBatches} batch(es), ${totalRepairCalls} coverage repair call(s), ${batchesFailed} batch failure(s), ${warnings.length} warning(s)`);
 
+    execution.check();
     return { chunks, warnings, batchesProcessed, batchesFailed, totalBatches };
 }
 

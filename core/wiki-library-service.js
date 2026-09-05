@@ -55,6 +55,8 @@ import {
 } from './wiki-library-store.js';
 import { createWikiIndex } from './wiki-search-index.js';
 import { log } from './log.js';
+import { shouldFallbackToPlugin, regexFromString, scrapeWiki } from './wiki-scraper.js';
+import { fetchPluginWiki, wikiSourceName } from './wiki-plugin.js';
 
 // e621's wiki-page id space (~120k) at 320/request — the fetch-everything
 // confirm dialog needs a number before the first walk has counted anything
@@ -181,7 +183,12 @@ async function withTask(kind, libraryId, work) {
     };
     emit('task-status', { task: { ...activeTask } });
     try {
-        return await work(activeTask);
+        const result = await work(activeTask);
+        if (activeTask.abortController.signal.aborted) throw new WikiScrapeError('aborted', 'Wiki acquisition cancelled');
+        return result;
+    } catch (error) {
+        if (activeTask.abortController.signal.aborted) throw new WikiScrapeError('aborted', 'Wiki acquisition cancelled');
+        throw error;
     } finally {
         activeTask = null;
         emit('task-status', { task: null });
@@ -278,7 +285,7 @@ async function runMediaWikiEnumeration(library, { filter, signal, stopToken }) {
     return { count: result.count, stopped: result.stopped, complete: !result.stopped && result.continue === null };
 }
 
-async function runE621Enumeration(library, { signal, stopToken }) {
+async function runE621Enumeration(library, { signal, stopToken, rememberPages }) {
     const idx = await ensureIndexLoaded();
     const base = new URL(library.apiUrl).origin;
     const resumeCursor = !library.enumComplete && Number.isFinite(library.checkpoint)
@@ -291,6 +298,7 @@ async function runE621Enumeration(library, { signal, stopToken }) {
         signal,
         stopToken,
         onBatch: async (records, cursor) => {
+            rememberPages?.(records);
             const full = records.map(r => ({
                 ...r,
                 libraryId: library.id,
@@ -312,10 +320,10 @@ async function runE621Enumeration(library, { signal, stopToken }) {
     return { count: result.count, stopped: result.stopped, complete: result.done };
 }
 
-async function runEnumeration(library, { filter, signal, stopToken }) {
+async function runEnumeration(library, { filter, signal, stopToken, rememberPages }) {
     try {
         return library.wikiType === 'e621'
-            ? await runE621Enumeration(library, { signal, stopToken })
+            ? await runE621Enumeration(library, { signal, stopToken, rememberPages })
             : await runMediaWikiEnumeration(library, { filter, signal, stopToken });
     } catch (error) {
         // Quota mid-scrape = implicit Stop & Keep: the checkpoint and every
@@ -343,43 +351,127 @@ async function runEnumeration(library, { filter, signal, stopToken }) {
  * @param {string} [options.filter] - Optional title regex applied while indexing
  * @returns {Promise<{libraryId: string, count: number, stopped: boolean, complete: boolean}>}
  */
-export async function startEnumeration({ wikiType, url, filter }) {
-    await ensureIndexLoaded();
-    const apiUrl = wikiType === 'e621'
-        ? resolveE621Base(url)
-        : await discoverApiEndpoint(wikiType, url);
-    const identity = deriveLibraryIdentity(wikiType, apiUrl);
+export async function startEnumeration(options) {
+    return acquireWiki({ ...options, kind: 'index' });
+}
 
-    return withTask('enumerate', identity.id, async (task) => {
-        const library = await upsertLibrary({
-            id: identity.id,
-            wikiType,
-            inputUrl: url ?? '',
-            apiUrl,
-            name: identity.name,
+/** One task spans discovery, enumeration, content acquisition and fallback. */
+export async function acquireWiki({ wikiType, url, filter, kind = 'index', confirmFullDownload, persistent = true }) {
+    return withTask(kind, null, async task => {
+        const signal = task.abortController.signal;
+        const retainedPages = new Map();
+        const titleFilter = filter ? regexFromString(String(filter)) : null;
+        const rememberPages = pages => pages.forEach(p => {
+            const content = p.plaintext ?? p.content;
+            if (content && (!titleFilter || new RegExp(titleFilter).test(p.title + '\n'))) {
+                retainedPages.set(p.title, { title: p.title, content });
+            }
         });
-        emit('library-updated', { library: { ...library } });
-
-        const result = await runEnumeration(library, {
-            filter,
-            signal: task.abortController.signal,
-            stopToken: task.stopToken,
+        const options = { signal, stopToken: task.stopToken, rememberPages };
+        const check = () => {
+            if (signal.aborted) throw new WikiScrapeError('aborted', 'Wiki acquisition cancelled');
+        };
+        let library;
+        const unsavedResult = () => ({
+            libraryId: library?.id, stopped: true, saved: false,
+            source: shapeWikiSource([...retainedPages.values()], { wikiType, url, name: library?.name || wikiSourceName(url, wikiType) }),
+            warning: 'Some fetched content was not saved. These pages remain usable for this session; previously saved pages were kept.',
         });
-        return { libraryId: library.id, ...result };
+        try {
+            if (!persistent) {
+                const pages = await scrapeWiki({ wikiType, url, filter, signal,
+                    onProgress: p => updateTaskProgress(p.phase, p.done, p.total) });
+                check();
+                return { source: shapeWikiSource(pages, { wikiType, url, name: wikiSourceName(url, wikiType) }),
+                    saved: false, warning: 'Not saved: the Wiki Library is unavailable. Content is usable for this session.' };
+            }
+            await ensureIndexLoaded();
+            check();
+            const apiUrl = wikiType === 'e621' ? resolveE621Base(url)
+                : await discoverApiEndpoint(wikiType, url, { signal });
+            check();
+            const identity = deriveLibraryIdentity(wikiType, apiUrl);
+            task.libraryId = identity.id;
+            library = await upsertLibrary({ id: identity.id, wikiType, inputUrl: url ?? '', apiUrl, name: identity.name });
+            check();
+            emit('library-updated', { library: { ...library } });
+            const result = await runEnumeration(library, { ...options, filter });
+            check();
+            if (result.quota && retainedPages.size) return unsavedResult();
+            let fetched = {};
+            if (kind === 'full' && wikiType !== 'e621' && !result.stopped) {
+                const records = await getPagesByLibrary(library.id);
+                rememberPages(records.filter(r => r.contentFetched));
+                check();
+                fetched = await runContentFetch(library.id, records.filter(r => !r.contentFetched).map(r => r.key), options);
+            }
+            check();
+            const source = kind === 'full' || wikiType === 'e621'
+                ? await materializeWikiSource(library.id, filter) : null;
+            check();
+            return { libraryId: library.id, ...result, ...fetched, source, saved: true };
+        } catch (error) {
+            check();
+            if (error instanceof WikiLibraryError && retainedPages.size) return unsavedResult();
+            if (wikiType === 'e621' || !shouldFallbackToPlugin(error) || task.stopToken.stopped) throw error;
+            if (kind !== 'full') {
+                const consent = await confirmFullDownload?.();
+                check();
+                if (!consent) return { libraryId: library?.id, stopped: true, declined: true };
+            }
+            if (task.stopToken.stopped) return { libraryId: library?.id, stopped: true, declined: true };
+            updateTaskProgress('plugin', 0, null);
+            const pages = await fetchPluginWiki({ wikiType, url, filter, signal });
+            check();
+            const source = shapeWikiSource(pages, { wikiType, url, name: wikiSourceName(url, wikiType) });
+            if (!source.pageCount) throw new Error('No content found');
+            let saved = true;
+            let warning;
+            let libraryId = library?.id;
+            try {
+                if (!persistent) throw new Error('Wiki Library unavailable');
+                const persisted = await ingestPluginPages(wikiType, url, source.pages, { signal });
+                libraryId = persisted.libraryId;
+            } catch (error) {
+                check();
+                saved = false;
+                warning = 'Not saved to the Wiki Library. These pages are available for this session only.';
+                log.warn('[WikiLibrary] Plugin content retained in memory:', error);
+            }
+            check();
+            return { libraryId, source, saved, warning, stopped: task.stopToken.stopped, plugin: true };
+        }
     });
 }
 
+function shapeWikiSource(pages, { wikiType, url, name }) {
+    pages = (pages ?? []).filter(p => p?.title && p?.content).map(p => ({ title: String(p.title), content: String(p.content) }));
+    const content = pages.map(p => `# ${p.title.trim()}\n\n${p.content.trim()}`).join('\n\n---\n\n');
+    return { type: 'wiki', wikiType, url, name, pages, pageCount: pages.length, content };
+}
+
+export async function materializeWikiSource(libraryId, filter) {
+    const library = await getLibrary(libraryId);
+    if (!library) return null;
+    const regex = filter ? regexFromString(String(filter)) : undefined;
+    const records = await getPagesByLibrary(libraryId, { fetchedOnly: true });
+    return shapeWikiSource(records.filter(r => r.plaintext && (!regex || new RegExp(regex).test(r.title + '\n')))
+        .map(r => ({ title: r.title, content: r.plaintext })),
+        { wikiType: library.wikiType, url: library.inputUrl, name: library.name });
+}
 /**
  * Resumes enumeration of an existing library from its stored checkpoint.
  * @param {string} libraryId
  */
 export async function resumeEnumeration(libraryId) {
-    await ensureIndexLoaded();
-    const library = await getLibrary(libraryId);
-    if (!library) {
-        throw new WikiLibraryError('storage', `Unknown library: ${libraryId}`);
-    }
     return withTask('enumerate', libraryId, async (task) => {
+        await ensureIndexLoaded();
+        const library = await getLibrary(libraryId);
+        if (!library) {
+            throw new WikiLibraryError('storage', `Unknown library: ${libraryId}`);
+        }
+        task.abortController.signal.throwIfAborted();
+
         const result = await runEnumeration(library, {
             signal: task.abortController.signal,
             stopToken: task.stopToken,
@@ -392,7 +484,7 @@ export async function resumeEnumeration(libraryId) {
 // Content fetching
 // ---------------------------------------------------------------------------
 
-async function runContentFetch(libraryId, keys, { signal, stopToken }) {
+async function runContentFetch(libraryId, keys, { signal, stopToken, rememberPages }) {
     const idx = await ensureIndexLoaded();
     const library = await getLibrary(libraryId);
     if (!library) {
@@ -414,6 +506,7 @@ async function runContentFetch(libraryId, keys, { signal, stopToken }) {
         signal,
         stopToken,
         onBatch: async (pages) => {
+            rememberPages?.(pages);
             const updates = pages.map(p => ({
                 key: pageKey(libraryId, p.title),
                 content: p.content,
@@ -484,12 +577,14 @@ export async function fetchContentForKeys(keys) {
  * @returns {Promise<{libraryId: string, enumerated: number, fetched: number, stopped: boolean}>}
  */
 export async function fetchEverything(libraryId) {
-    await ensureIndexLoaded();
-    const library = await getLibrary(libraryId);
-    if (!library) {
-        throw new WikiLibraryError('storage', `Unknown library: ${libraryId}`);
-    }
     return withTask('full', libraryId, async (task) => {
+        await ensureIndexLoaded();
+        const library = await getLibrary(libraryId);
+        if (!library) {
+            throw new WikiLibraryError('storage', `Unknown library: ${libraryId}`);
+        }
+        task.abortController.signal.throwIfAborted();
+
         let enumerated = 0;
         if (!library.enumComplete) {
             const enumResult = await runEnumeration(library, {
@@ -561,7 +656,8 @@ export async function estimateFullWalk(libraryId) {
  * @param {Array<{title: string, content: string}>} pages
  * @returns {Promise<{libraryId: string, count: number}>}
  */
-export async function ingestPluginPages(wikiType, url, pages) {
+export async function ingestPluginPages(wikiType, url, pages, { signal } = {}) {
+    signal?.throwIfAborted();
     const idx = await ensureIndexLoaded();
     const apiUrl = buildApiCandidates(wikiType, url)[0];
     const identity = deriveLibraryIdentity(wikiType, apiUrl);
@@ -589,7 +685,9 @@ export async function ingestPluginPages(wikiType, url, pages) {
             plaintext: p.content,
             contentFetched: true,
         }));
+    signal?.throwIfAborted();
     const stats = await putPages(records);
+    signal?.throwIfAborted();
     await persistBatch(library, records, { stats });
     idx.addDocs(records);
     return { libraryId: library.id, count: records.length };

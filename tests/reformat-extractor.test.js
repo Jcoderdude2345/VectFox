@@ -69,6 +69,29 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('reformatDocument — batching', () => {
+    it('passes user cancellation to transport and suppresses late continuation results', async () => {
+        const controller = new AbortController();
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const progress = vi.fn();
+        const fetchMock = vi.fn(async () => {
+            await gate;
+            return mockChatCompletionResponse([{ entry_type: 'concept', name: 'Topic', body: 'Some content' }]);
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        const run = reformatDocument({ text: '# Topic\n\n' + 'A long paragraph. '.repeat(80), contentType: 'document',
+            settings: baseSettings(), abortSignal: controller.signal, onProgress: progress });
+        const assertion = expect(run).rejects.toMatchObject({ name: 'AbortError' });
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+        controller.abort();
+        expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+        release();
+        await assertion;
+        expect(fetchMock).toHaveBeenCalledOnce();
+        expect(progress).not.toHaveBeenCalled();
+        vi.unstubAllGlobals();
+    });
+
     it('splits an oversized section into continuation batches and threads already-extracted names forward', async () => {
         const doc = [
             '# Intro',

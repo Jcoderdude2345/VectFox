@@ -51,6 +51,7 @@ const CHAT_COMPLETIONS_ENDPOINT = '/api/backends/chat-completions/generate';
  * @param {number}   params.timeoutMs
  * @param {string}   [params.vllmUrl]        - Required when provider is 'vllm'.
  * @param {object}   [params.responseFormat] - Omitted from the body when absent.
+ * @param {AbortSignal} [params.signal] - Caller cancellation, combined with the request timeout.
  * @returns {Promise<{ok: true, status: number, data: any} | {ok: false, status: number, errText: string}>}
  */
 export async function callChatCompletion({
@@ -62,6 +63,7 @@ export async function callChatCompletion({
     timeoutMs,
     vllmUrl,
     responseFormat,
+    signal,
 }) {
     const isVllm = provider === 'vllm';
 
@@ -77,7 +79,7 @@ export async function callChatCompletion({
             temperature,
             ...(responseFormat ? { response_format: responseFormat } : {}),
         }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {

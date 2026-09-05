@@ -11,3 +11,9 @@ _Avoid_: Purge (which refers only to vector deletion)
 **Partial removal**:
 A collection removal in which some deletion or cleanup succeeded but the whole removal is not complete.
 _Avoid_: Successful deletion
+
+**Wiki acquisition**:
+Obtaining wiki titles or page content, including whether the content is saved in the Wiki Library or available only for the current session.
+
+**Auto-Reformat run**:
+One attempt to turn a particular source into a reviewed, accepted set of entries. An unfinished or obsolete run is distinct from a previously accepted result.

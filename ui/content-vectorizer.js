@@ -39,7 +39,6 @@ import { getCleaningSettings } from '../core/text-cleaning.js';
 import { progressTracker } from './progress-tracker.js';
 import { isFatbodyOwnedBook } from '../core/fatbody-guard.js';
 import {
-    scrapeWiki as scrapeWikiInternal,
     WikiScrapeError,
     shouldFallbackToPlugin,
     regexFromString,
@@ -47,6 +46,9 @@ import {
     resolveE621Base,
 } from '../core/wiki-scraper.js';
 import * as wikiLibrary from '../core/wiki-library-service.js';
+import { createReformatSession } from '../core/reformat-run.js';
+import { closeReformatReview } from './reformat-review.js';
+import { isWikiPluginAvailable } from '../core/wiki-plugin.js';
 
 // ============================================================================
 // STATE
@@ -57,8 +59,12 @@ let currentSettings = {};
 let sourceData = null;
 let activeVectorizeAbortController = null;
 let isVectorizing = false;
-let wikiScrapeAbortController = null;
 let startFromMessage = 1;
+const reformatSession = createReformatSession();
+function invalidateAutoReformat() {
+    reformatSession.cancel();
+    closeReformatReview();
+}
 
 function syncStartFromMessageFromUI() {
     const raw = parseInt($('#vectfox_cv_startfrom').val(), 10);
@@ -112,6 +118,7 @@ function stopActiveVectorization() {
 export function openContentVectorizer(initialType = null) {
     currentContentType = initialType;
     currentSettings = initialType ? { ...getContentTypeDefaults(initialType) } : {};
+    invalidateAutoReformat();
     sourceData = null;
     wikiSourceMode = 'scrape';
     stashedScrapeSourceData = null;
@@ -140,6 +147,7 @@ export function openContentVectorizer(initialType = null) {
  * Closes the modal
  */
 export function closeContentVectorizer() {
+    invalidateAutoReformat();
     teardownWikiLibraryEvents();
     $('#vectfox_content_vectorizer_modal').fadeOut(200, function() {
         $(this).remove();
@@ -966,12 +974,12 @@ function renderReformatSection() {
  * Forces wiki away from `per_page` (which would return an array of per-page
  * objects, not a single string the batching packer can consume).
  */
-async function _resolveReformatSourceText(source) {
+async function _resolveReformatSourceText(source, contentType = currentContentType, settings = currentSettings) {
     const { resolveAndPrepareContent } = await import('../core/content-vectorization.js');
-    const prepSettings = currentContentType === 'wiki'
-        ? { ...currentSettings, strategy: 'adaptive' }
-        : currentSettings;
-    const prepared = await resolveAndPrepareContent(currentContentType, source, prepSettings);
+    const prepSettings = contentType === 'wiki'
+        ? { ...settings, strategy: 'adaptive' }
+        : settings;
+    const prepared = await resolveAndPrepareContent(contentType, source, prepSettings);
     if (typeof prepared.text === 'string') return prepared.text;
     if (Array.isArray(prepared.text)) {
         return prepared.text.map(t => (typeof t === 'string' ? t : t.text || '')).join('\n\n---\n\n');
@@ -1035,24 +1043,33 @@ async function runAutoReformat() {
         return;
     }
 
+    invalidateAutoReformat();
+    const run = reformatSession.start({ source, contentType: currentContentType, settings: resolveEffectiveSettings(currentSettings) });
+    const { contentType, settings: mergedSettings } = run.snapshot;
+    const stopButton = '<button id="vectfox_cv_reformat_stop" class="vectfox-btn-secondary">Cancel Auto-Reformat</button>';
     const container = $('#vectfox_cv_reformat_content');
     container.html('<div class="vectfox-cv-loading"><i class="fa-solid fa-spinner fa-spin"></i> Preparing content...</div>');
 
+    container.append(stopButton);
     try {
-        const text = await _resolveReformatSourceText(source);
+        const text = await _resolveReformatSourceText(run.snapshot.source, contentType, mergedSettings);
+        run.assertCurrent();
         if (!text.trim()) {
             container.html('<div class="vectfox-cv-error">Could not load content. Please check your selection.</div>');
             return;
         }
 
         const { getStringHash } = await import('../../../../utils.js');
+        run.assertCurrent();
         const sourceHash = getStringHash(text);
-        const mergedSettings = resolveEffectiveSettings(currentSettings);
+
 
         const { getReformatCache } = await import('../core/reformat-store.js');
+        run.assertCurrent();
         const existing = getReformatCache(sourceHash);
         if (existing?.chunks?.length) {
             const choice = await _promptReuseOrRerun(existing);
+            run.assertCurrent();
             if (choice === 'reuse') {
                 currentSettings.reformat = { accepted: true, sourceHash };
                 renderReformatSection();
@@ -1071,12 +1088,15 @@ async function runAutoReformat() {
 
         container.html('<div class="vectfox-cv-loading"><i class="fa-solid fa-spinner fa-spin"></i> Running Auto-Reformat...</div>');
 
+        container.append(stopButton);
         const { reformatDocument } = await import('../core/reformat-extractor.js');
         const result = await reformatDocument({
             text,
-            contentType: currentContentType,
+            contentType,
+            abortSignal: run.signal,
             settings: mergedSettings,
             onProgress: (done, total, phase) => {
+                if (!run.isCurrent()) return;
                 const label = phase === 'link'
                     ? `Running Auto-Reformat — linking pass (${done}/${total})...`
                     : `Running Auto-Reformat — extracting (${done}/${total} batches)...`;
@@ -1086,6 +1106,7 @@ async function runAutoReformat() {
             },
         });
 
+        run.assertCurrent();
         if (result.chunks.length === 0) {
             const extra = result.warnings.length ? ` ${result.warnings.join(' ')}` : '';
             container.html(`<div class="vectfox-cv-error">Auto-Reformat produced no entries.${extra}</div>`);
@@ -1095,21 +1116,24 @@ async function runAutoReformat() {
         renderReformatSection();
 
         const { openReformatReview } = await import('./reformat-review.js');
-        const sourceName = source.name || source.filename || source.title || currentContentType;
+        run.assertCurrent();
+        const sourceName = source.name || source.filename || source.title || contentType;
         openReformatReview({
             chunks: result.chunks,
             warnings: result.warnings,
             sourceText: text,
             sourceName,
-            contentType: currentContentType,
-            onAccept: (acceptedRecords) => _finalizeReformatAccept({ acceptedRecords, sourceHash, text, sourceName, mergedSettings, selectionDescriptor: source.selectionDescriptor }),
+            contentType,
+            onAccept: (acceptedRecords) => _finalizeReformatAccept({ run, contentType, acceptedRecords, sourceHash, text, sourceName, mergedSettings, selectionDescriptor: source.selectionDescriptor }),
             onDiscard: () => {
-                currentSettings.reformat = null;
+                if (!run.isCurrent()) return;
+                reformatSession.cancel();
                 renderReformatSection();
             },
-            onRerun: () => runAutoReformat(),
+            onRerun: () => { if (run.isCurrent()) runAutoReformat(); },
         });
     } catch (e) {
+        if (!run.isCurrent() || e?.name === 'AbortError') return;
         console.error('VectFox: Auto-Reformat failed:', e);
         container.html(`<div class="vectfox-cv-error">Auto-Reformat failed: ${e.message}</div>`);
     }
@@ -1122,8 +1146,9 @@ async function runAutoReformat() {
  * downstream needs special-casing), freezes it in reformat-store.js keyed by
  * sourceHash, and flips currentSettings.reformat to accepted.
  */
-async function _finalizeReformatAccept({ acceptedRecords, sourceHash, text, sourceName, mergedSettings, selectionDescriptor }) {
+async function _finalizeReformatAccept({ run, contentType, acceptedRecords, sourceHash, text, sourceName, mergedSettings, selectionDescriptor }) {
     try {
+        run.assertCurrent();
         const { expandOversizedChunk } = await import('../core/reformat-extractor.js');
         const { saveReformatCache, getReformatCache } = await import('../core/reformat-store.js');
         const { buildRelationalClause, REFORMAT_SCHEMA_VERSION } = await import('../core/reformat-schema.js');
@@ -1133,7 +1158,9 @@ async function _finalizeReformatAccept({ acceptedRecords, sourceHash, text, sour
 
         const shapedChunks = [];
         for (const record of acceptedRecords) {
+            run.assertCurrent();
             const expanded = await expandOversizedChunk(record, maxBodyChars);
+            run.assertCurrent();
             for (const piece of expanded) {
                 shapedChunks.push({
                     // affiliation/relationships are otherwise inert metadata (never read by
@@ -1162,6 +1189,7 @@ async function _finalizeReformatAccept({ acceptedRecords, sourceHash, text, sour
 
         const providerModel = `${mergedSettings.reformat_provider || mergedSettings.summarize_provider || 'openrouter'}:${mergedSettings.reformat_model || mergedSettings.summarize_model || ''}`;
 
+        run.assertCurrent();
         if (previous?.chunks?.length) {
             // Re-running Auto-Reformat produces a new, non-deterministic generation.
             // Document/URL/Wiki vectorization always mints a brand-new collection per
@@ -1191,30 +1219,34 @@ async function _finalizeReformatAccept({ acceptedRecords, sourceHash, text, sour
         const runId = `${sourceHash}_${acceptedAt}`;
         shapedChunks.forEach(c => { c.metadata.reformatRunId = runId; });
 
-        saveReformatCache(sourceHash, {
-            chunks: shapedChunks,
-            originalText: text,
-            contentType: currentContentType,
-            sourceName,
-            providerModel,
-            schemaVersion: REFORMAT_SCHEMA_VERSION,
-            selectionDescriptor: selectionDescriptor || '',
-            acceptedAt,
-        });
-
-        // Basket sources also pin the exact page selection, so a later basket
-        // edit can warn instead of silently orphaning the accepted result
         const { getStringHash: hashString } = await import('../../../../utils.js');
-        currentSettings.reformat = {
-            accepted: true,
-            sourceHash,
-            ...(selectionDescriptor ? { selectionHash: hashString(selectionDescriptor) } : {}),
-        };
+        run.publish(() => {
+            saveReformatCache(sourceHash, {
+                chunks: shapedChunks,
+                originalText: text,
+                contentType,
+                sourceName,
+                providerModel,
+                schemaVersion: REFORMAT_SCHEMA_VERSION,
+                selectionDescriptor: selectionDescriptor || '',
+                acceptedAt,
+            });
+
+            // Basket sources also pin the exact page selection, so a later basket
+            // edit can warn instead of silently orphaning the accepted result
+
+            currentSettings.reformat = {
+                accepted: true,
+                sourceHash,
+                ...(selectionDescriptor ? { selectionHash: hashString(selectionDescriptor) } : {}),
+            };
+        });
         toastr.success(`Auto-Reformat accepted: ${shapedChunks.length} chunk(s) ready. Click Vectorize to store them.`, 'VectFox');
 
         renderReformatSection();
         updateChunkingSection(getContentType(currentContentType));
     } catch (e) {
+        if (!run.isCurrent() || e?.name === 'AbortError') return;
         console.error('VectFox: Failed to finalize Auto-Reformat accept:', e);
         toastr.error('Failed to save Auto-Reformat result: ' + e.message, 'VectFox');
     }
@@ -1539,6 +1571,14 @@ function renderTextCleaningOptions() {
  * Binds all event handlers
  */
 function bindEvents() {
+    $('#vectfox_content_vectorizer_modal').on('input.reformat change.reformat', 'input, select, textarea', () => {
+        invalidateAutoReformat();
+        renderReformatSection();
+    }).on('click.reformat', '#vectfox_cv_reformat_stop', () => {
+        invalidateAutoReformat();
+        renderReformatSection();
+        toastr.info('Auto-Reformat cancelled. Previously accepted results were kept.', 'VectFox');
+    });
     // Close handlers
     $('#vectfox_cv_close').on('click', closeContentVectorizer);
     $('#vectfox_cv_cancel').on('click', function() {
@@ -1702,6 +1742,7 @@ function bindSourceEvents(type) {
         $(`.vectfox-cv-source-panel[data-panel="${source}"]`).show();
 
         // Clear sourceData when switching tabs
+        invalidateAutoReformat();
         sourceData = null;
 
         // Always hide chunking for chat uploads — EventBase uses its own window/overlap settings
@@ -1972,6 +2013,7 @@ function handleFileUpload(e) {
                 // ST lorebook format has entries object
                 if (data.entries) {
                     const entries = Object.values(data.entries).filter(e => e.content);
+                    invalidateAutoReformat();
                     sourceData = {
                         type: 'file',
                         filename: file.name,
@@ -2002,6 +2044,7 @@ function handleFileUpload(e) {
                 const data = JSON.parse(content);
                 // Look for character data fields
                 if (data.name || data.description || data.personality) {
+                    invalidateAutoReformat();
                     sourceData = {
                         type: 'file',
                         filename: file.name,
@@ -2024,6 +2067,7 @@ function handleFileUpload(e) {
             }
         } else {
             // Generic file upload
+            invalidateAutoReformat();
             sourceData = {
                 type: 'file',
                 filename: file.name,
@@ -2063,6 +2107,7 @@ async function handleCharacterPngUpload(file) {
             throw new Error('No character data found in PNG');
         }
 
+        invalidateAutoReformat();
         sourceData = {
             type: 'file',
             filename: file.name,
@@ -2166,6 +2211,7 @@ function extractCharaFromPng(bytes) {
  * Clears uploaded file
  */
 function clearUpload() {
+    invalidateAutoReformat();
     sourceData = null;
     $('#vectfox_cv_upload_zone').show();
     $('#vectfox_cv_upload_info').hide();
@@ -2214,6 +2260,7 @@ async function fetchUrl() {
             throw new Error('No meaningful content found on page');
         }
 
+        invalidateAutoReformat();
         sourceData = {
             type: 'url',
             url: url,
@@ -2299,204 +2346,35 @@ function renderPluginHint() {
 }
 
 /**
- * Checks if the wiki plugin is available via probe endpoint
- */
-async function isWikiPluginAvailable(wikiType) {
-    try {
-        const endpoint = wikiType === 'fandom'
-            ? '/api/plugins/fandom/probe'
-            : '/api/plugins/fandom/probe-mediawiki';
-
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-        });
-
-        return response.ok;
-    } catch (error) {
-        console.debug('VectFox: Wiki plugin probe failed:', error);
-        return false;
-    }
-}
-
-/**
- * Scrapes wiki content — built-in browser scraper first, with the external
- * Fandom Scraper plugin as a fallback for wikis that block browser access.
- * While a scrape runs, the button becomes Cancel.
+ * Scrapes in session-only mode when the Wiki Library is unavailable.
  */
 async function scrapeWiki() {
-    // A scrape is already running — this click means Cancel
-    if (wikiScrapeAbortController) {
-        wikiScrapeAbortController.abort();
-        return;
-    }
-
+    if (wikiLibrary.isBusy()) { wikiLibrary.cancelHard(); return; }
     const wikiType = $('#vectfox_cv_wiki_type').val();
     const url = $('#vectfox_cv_wiki_url').val().trim();
     const filter = $('#vectfox_cv_wiki_filter').val().trim();
-
-    // e621 needs no URL — blank defaults to e621.net
-    if (!url && wikiType !== 'e621') {
-        toastr.warning('Please enter a wiki URL or ID');
-        return;
-    }
-
+    if (!url && wikiType !== 'e621') { toastr.warning('Please enter a wiki URL or ID'); return; }
+    if (wikiType === 'e621' && !await callGenericPopup(
+        '<p>This downloads the full e621 wiki corpus and can take several minutes. Continue?</p>', POPUP_TYPE.CONFIRM)) return;
     const status = $('#vectfox_cv_wiki_status');
-    const preview = $('#vectfox_cv_wiki_preview');
-    const scrapeBtn = $('#vectfox_cv_scrape_wiki');
-
-    wikiScrapeAbortController = new AbortController();
-    // e621's wiki corpus is large (100k+ page ids) and, to keep filter matching
-    // consistent with the MediaWiki path (unanchored regex, not e621's own
-    // exact-match search), scraping always walks the full corpus — a filtered
-    // scrape can take several minutes even though it returns few pages.
-    status.html(wikiType === 'e621'
-        ? '<i class="fa-solid fa-spinner fa-spin"></i> Scraping e621 wiki (large corpus — this can take several minutes; Cancel is available)...'
-        : '<i class="fa-solid fa-spinner fa-spin"></i> Scraping wiki...');
-    preview.hide();
-    // Clear the previous run's title list so a failed re-scrape can't show stale titles
-    $('#vectfox_cv_wiki_page_list').empty();
-    $('#vectfox_cv_wiki_pages_details').prop('open', false);
-    scrapeBtn.html('<i class="fa-solid fa-stop"></i> Cancel');
-
+    const button = $('#vectfox_cv_scrape_wiki');
+    button.text('Cancel');
+    status.text('Fetching wiki content…');
+    $('#vectfox_cv_wiki_preview').hide();
     try {
-        let pages;
-        try {
-            pages = await scrapeWikiInternal({
-                wikiType,
-                url,
-                filter,
-                signal: wikiScrapeAbortController.signal,
-                onProgress: (progress) => {
-                    if (progress.phase === 'titles') {
-                        status.html(`<i class="fa-solid fa-spinner fa-spin"></i> Listing pages… ${progress.done} found`);
-                    } else if (progress.phase === 'content') {
-                        status.html(`<i class="fa-solid fa-spinner fa-spin"></i> Fetching content ${progress.done}/${progress.total}…`);
-                    }
-                },
-            });
-        } catch (e) {
-            // The Fandom Scraper plugin has no e621 endpoints — a fallback
-            // there would only produce a misleading "install plugin" hint.
-            if (wikiType === 'e621' || !shouldFallbackToPlugin(e)) {
-                throw e;
-            }
-            if (!await isWikiPluginAvailable(wikiType)) {
-                e.showPluginHint = true;
-                throw e;
-            }
-            console.warn('VectFox: Built-in wiki scraper blocked, falling back to Fandom Scraper plugin:', e.message);
-            status.html('<i class="fa-solid fa-spinner fa-spin"></i> Browser scrape blocked — using Fandom Scraper plugin...');
-            pages = await scrapeViaPlugin(wikiType, url, filter);
-        }
-
-        if (!pages || pages.length === 0) {
-            throw new Error('No content found');
-        }
-
-        // Combine pages into content
-        const combinedContent = pages.map(page =>
-            `# ${String(page.title).trim()}\n\n${String(page.content).trim()}`
-        ).join('\n\n---\n\n');
-
-        sourceData = {
-            type: 'wiki',
-            wikiType: wikiType,
-            url: url,
-            content: combinedContent,
-            pages: pages,
-            pageCount: pages.length,
-            name: extractWikiName(url, wikiType),
-        };
-
-        status.html('');
-        showWikiPreview(pages, combinedContent);
-
-        toastr.success(`Scraped ${pages.length} page(s), ${combinedContent.length.toLocaleString()} chars`, 'VectFox');
-
-    } catch (e) {
-        if (e instanceof WikiScrapeError && e.code === 'aborted') {
-            console.log('VectFox: Wiki scrape cancelled');
-            status.html('<i class="fa-solid fa-ban"></i> Scrape cancelled');
-        } else {
-            console.error('VectFox: Wiki scrape failed:', e);
-            status.html(`<i class="fa-solid fa-times" style="color: var(--vectfox-danger);"></i> ${e.message}`);
-            if (e.showPluginHint) {
-                status.append(renderPluginHint());
-            }
-            toastr.error('Failed to scrape wiki: ' + e.message);
-        }
+        const result = await wikiLibrary.acquireWiki({ wikiType, url, filter, kind: 'full', persistent: false });
+        if (!result.source?.pageCount) throw new Error('No content found');
+        invalidateAutoReformat();
+        sourceData = result.source;
+        showWikiPreview(sourceData.pages, sourceData.content);
+        status.text(result.warning);
+        toastr.warning(result.warning, 'VectFox');
+    } catch (error) {
+        status.text(error.code === 'aborted' ? 'Scrape cancelled' : `Wiki task failed: ${error.message}`);
     } finally {
-        wikiScrapeAbortController = null;
-        scrapeBtn.html('<i class="fa-solid fa-download"></i> Scrape Wiki');
+        button.text('Scrape');
     }
 }
-
-/**
- * Scrapes wiki content using the external Fandom Scraper server plugin
- * (fallback path — same endpoints and bodies as before the built-in scraper).
- */
-async function scrapeViaPlugin(wikiType, url, filter) {
-    const endpoint = wikiType === 'fandom'
-        ? '/api/plugins/fandom/scrape'
-        : '/api/plugins/fandom/scrape-mediawiki';
-
-    // Build request body based on wiki type
-    let requestBody;
-    if (wikiType === 'fandom') {
-        // Extract fandom ID from URL
-        const fandomId = extractFandomId(url);
-        requestBody = { fandom: fandomId, filter: filter };
-    } else {
-        requestBody = { url: url, filter: filter };
-    }
-
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || `HTTP ${response.status}`);
-    }
-
-    return response.json();
-}
-
-/**
- * Extracts fandom ID from URL
- */
-function extractFandomId(url) {
-    try {
-        const urlObj = new URL(url);
-        return urlObj.hostname.split('.')[0] || url;
-    } catch {
-        return url;
-    }
-}
-
-/**
- * Extracts wiki name from URL for collection naming
- */
-function extractWikiName(url, wikiType) {
-    try {
-        if (wikiType === 'e621') {
-            return 'e621-wiki';
-        }
-        if (wikiType === 'fandom') {
-            return extractFandomId(url);
-        }
-        const urlObj = new URL(url);
-        // Try to get article name from path
-        const pathParts = urlObj.pathname.split('/').filter(p => p);
-        return pathParts[pathParts.length - 1] || urlObj.hostname;
-    } catch {
-        return url.substring(0, 50);
-    }
-}
-
 /**
  * Renders the shared wiki preview panel (page/char counts + title list).
  * Page titles are remote-controlled strings — build the list with .text()
@@ -2701,36 +2579,13 @@ async function refreshWikiLibraryPanel() {
  * as scrape-time filtering).
  */
 async function buildWikiSourceDataFromLibrary(libraryId, filter) {
-    const library = await wikiLibrary.getLibrary(libraryId);
-    if (!library) {
-        return false;
-    }
-    const records = await wikiLibrary.getPagesByLibrary(libraryId, { fetchedOnly: true });
-    const regex = filter ? regexFromString(String(filter)) : undefined;
-    const pages = records
-        .filter(r => r.plaintext && (!regex || new RegExp(regex).test(r.title + '\n')))
-        .map(r => ({ title: r.title, content: r.plaintext }));
-    if (pages.length === 0) {
-        return false;
-    }
-
-    const combinedContent = pages.map(page =>
-        `# ${String(page.title).trim()}\n\n${String(page.content).trim()}`
-    ).join('\n\n---\n\n');
-
-    sourceData = {
-        type: 'wiki',
-        wikiType: library.wikiType,
-        url: library.inputUrl,
-        content: combinedContent,
-        pages: pages,
-        pageCount: pages.length,
-        name: library.name,
-    };
-    showWikiPreview(pages, combinedContent);
+    const source = await wikiLibrary.materializeWikiSource(libraryId, filter);
+    if (!source?.pageCount) return false;
+    invalidateAutoReformat();
+    sourceData = source;
+    showWikiPreview(source.pages, source.content);
     return true;
 }
-
 /**
  * Runs an Index Titles / Fetch Everything / Resume task through the Wiki
  * Library service, with plugin fallback when the browser is CORS-blocked.
@@ -2781,17 +2636,28 @@ async function runWikiLibraryTask(kind) {
         if (kind === 'resume') {
             result = await wikiLibrary.resumeEnumeration($('#vectfox_cv_resume_indexing').data('libraryId'));
         } else {
-            result = await wikiLibrary.startEnumeration({ wikiType, url, filter });
-            if (kind === 'full' && wikiType !== 'e621' && !result.stopped) {
-                const fetchResult = await wikiLibrary.fetchEverything(result.libraryId);
-                result = { ...result, ...fetchResult };
-            }
+            result = await wikiLibrary.acquireWiki({
+                wikiType, url, filter, kind,
+                confirmFullDownload: () => callGenericPopup(
+                    '<p>The browser could not index titles. The fallback plugin downloads full page content. Continue with that larger download?</p>',
+                    POPUP_TYPE.CONFIRM),
+            });
         }
 
-        const library = await wikiLibrary.getLibrary(result.libraryId);
+        if (result.declined) { status.text('Stopped without starting the larger download.'); return; }
+        if (result.source?.pageCount && (!result.stopped || result.plugin || !result.saved)) {
+            invalidateAutoReformat();
+            sourceData = result.source;
+            showWikiPreview(sourceData.pages, sourceData.content);
+            status.text(result.warning || (result.stopped ? 'Stopped and kept the plugin result.' : ''));
+            if (!result.saved) toastr.warning(result.warning, 'VectFox');
+            else toastr.success(`Scraped ${sourceData.pageCount} page(s)`, 'VectFox');
+            return;
+        }
+        const library = result.libraryId ? await wikiLibrary.getLibrary(result.libraryId) : null;
         if (result.stopped) {
-            status.html(`<i class="fa-solid fa-circle-check"></i> Stopped — ${library.titleCount.toLocaleString()} pages kept in the library. Resume when ready.`);
-            toastr.info(`Stopped and kept ${library.titleCount.toLocaleString()} pages`, 'VectFox');
+            status.html(`<i class="fa-solid fa-circle-check"></i> Stopped — ${(library?.titleCount ?? 0).toLocaleString()} pages kept in the library. Resume when ready.`);
+            toastr.info(`Stopped and kept ${(library?.titleCount ?? 0).toLocaleString()} pages`, 'VectFox');
         } else if (kind === 'full' || wikiType === 'e621') {
             const built = await buildWikiSourceDataFromLibrary(result.libraryId, filter);
             status.html('');
@@ -2801,16 +2667,15 @@ async function runWikiLibraryTask(kind) {
                 status.html('<i class="fa-solid fa-circle-info"></i> Nothing matched the filter — adjust it or browse the Wiki Library.');
             }
         } else {
-            status.html(`<i class="fa-solid fa-circle-check"></i> ${library.titleCount.toLocaleString()} titles indexed — pick pages in the Wiki Library, or Fetch Everything.`);
-            toastr.success(`Indexed ${library.titleCount.toLocaleString()} titles`, 'VectFox');
+            status.html(`<i class="fa-solid fa-circle-check"></i> ${(library?.titleCount ?? 0).toLocaleString()} titles indexed — pick pages in the Wiki Library, or Fetch Everything.`);
+            toastr.success(`Indexed ${(library?.titleCount ?? 0).toLocaleString()} titles`, 'VectFox');
         }
     } catch (e) {
         if (e instanceof WikiScrapeError && e.code === 'aborted') {
             status.html('<i class="fa-solid fa-ban"></i> Cancelled — pages already saved were kept in the library.');
         } else if (e?.code === 'busy') {
             toastr.warning(e.message);
-        } else if (wikiType !== 'e621' && shouldFallbackToPlugin(e) && await isWikiPluginAvailable(wikiType)) {
-            await runWikiPluginFallback(wikiType, url, filter, status);
+
         } else {
             console.error('VectFox: Wiki Library task failed:', e);
             status.html(`<i class="fa-solid fa-times" style="color: var(--vectfox-danger);"></i> ${e.message}`);
@@ -2821,43 +2686,6 @@ async function runWikiLibraryTask(kind) {
         }
     } finally {
         refreshWikiLibraryPanel();
-    }
-}
-
-/**
- * CORS-blocked wikis fall back to the external Fandom Scraper plugin —
- * results still land in the library (no metadata, but persistent).
- */
-async function runWikiPluginFallback(wikiType, url, filter, status) {
-    try {
-        console.warn('VectFox: Built-in wiki scraper blocked, falling back to Fandom Scraper plugin');
-        status.html('<i class="fa-solid fa-spinner fa-spin"></i> Browser scrape blocked — using Fandom Scraper plugin...');
-        const pages = await scrapeViaPlugin(wikiType, url, filter);
-        if (!pages || pages.length === 0) {
-            throw new Error('No content found');
-        }
-        await wikiLibrary.ingestPluginPages(wikiType, url, pages)
-            .catch(err => console.warn('VectFox: Could not save plugin results to the Wiki Library:', err));
-
-        const combinedContent = pages.map(page =>
-            `# ${String(page.title).trim()}\n\n${String(page.content).trim()}`
-        ).join('\n\n---\n\n');
-        sourceData = {
-            type: 'wiki',
-            wikiType: wikiType,
-            url: url,
-            content: combinedContent,
-            pages: pages,
-            pageCount: pages.length,
-            name: extractWikiName(url, wikiType),
-        };
-        status.html('');
-        showWikiPreview(pages, combinedContent);
-        toastr.success(`Scraped ${pages.length} page(s), ${combinedContent.length.toLocaleString()} chars`, 'VectFox');
-    } catch (e) {
-        console.error('VectFox: Plugin fallback failed:', e);
-        status.html(`<i class="fa-solid fa-times" style="color: var(--vectfox-danger);"></i> ${e.message}`);
-        toastr.error('Failed to scrape wiki: ' + e.message);
     }
 }
 
@@ -2896,6 +2724,7 @@ async function setWikiSourceMode(mode) {
         await applyBasketAsSource();
     } else {
         currentBasketSelectionHash = null;
+        invalidateAutoReformat();
         sourceData = stashedScrapeSourceData;
         stashedScrapeSourceData = null;
         if (sourceData?.pages) {
@@ -2925,6 +2754,7 @@ async function applyBasketAsSource({ promptForUnfetched = true, quiet = false } 
         if (!quiet) {
             toastr.info('The basket is empty — pick pages in the Wiki Library first', 'VectFox');
         }
+        invalidateAutoReformat();
         sourceData = null;
         $('#vectfox_cv_wiki_preview').hide();
         return false;
@@ -2953,11 +2783,13 @@ async function applyBasketAsSource({ promptForUnfetched = true, quiet = false } 
         if (!quiet) {
             toastr.warning('None of the basket pages have content yet — fetch content first', 'VectFox');
         }
+        invalidateAutoReformat();
         sourceData = null;
         $('#vectfox_cv_wiki_preview').hide();
         return false;
     }
 
+    invalidateAutoReformat();
     sourceData = {
         type: 'wiki',
         wikiType: 'library',
@@ -3040,6 +2872,7 @@ async function fetchYouTubeTranscript() {
             throw new Error('No transcript available for this video');
         }
 
+        invalidateAutoReformat();
         sourceData = {
             type: 'youtube',
             videoId: videoId,
@@ -3243,6 +3076,7 @@ async function handleChatFileUpload(e) {
             || 'archive';
 
         // Store as sourceData
+        invalidateAutoReformat();
         sourceData = {
             type: 'file',
             filename: file.name,
@@ -3291,6 +3125,7 @@ async function handleChatFileUpload(e) {
  * Clears chat upload
  */
 function clearChatUpload() {
+    invalidateAutoReformat();
     sourceData = null;
     $('#vectfox_cv_chat_upload_zone').show();
     $('#vectfox_cv_chat_upload_info').hide();

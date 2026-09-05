@@ -63,6 +63,85 @@ function jsonResponse(body) {
 
 const SITEINFO = { query: { general: { sitename: 'Test Wiki' } } };
 
+describe('Wiki acquisition lifecycle', () => {
+    it('keeps downloaded browser content when the content write fails', async () => {
+        installMediaWikiMock();
+        vi.spyOn(store, 'updatePageContents').mockRejectedValueOnce(new store.WikiLibraryError('quota', 'Full'));
+        const result = await svc.acquireWiki({ wikiType: 'fandom', url: 'testwiki', kind: 'full' });
+        expect(result).toMatchObject({ stopped: true, saved: false });
+        expect(result.source.pages.map(p => p.title)).toEqual(['Alpha', 'Beta', 'Gamma']);
+        expect(result.warning).toContain('not saved');
+        expect((await store.getPagesByLibrary(result.libraryId)).length).toBe(3);
+    });
+
+    it('downloads content after explicit titles-fallback consent', async () => {
+        vi.stubGlobal('fetch', pluginFetch());
+        const consent = vi.fn(async () => true);
+        const result = await svc.acquireWiki({ wikiType: 'fandom', url: 'testwiki', kind: 'index', confirmFullDownload: consent });
+        expect(consent).toHaveBeenCalledOnce();
+        expect(result).toMatchObject({ saved: true, plugin: true, source: { pages } });
+    });
+
+    const pages = [{ title: 'Kept', content: 'Useful content' }];
+    function pluginFetch(gate) {
+        return vi.fn(async (url) => {
+            if (String(url).includes('/probe')) return jsonResponse({});
+            if (String(url).includes('/scrape')) {
+                if (gate) await gate;
+                return jsonResponse(pages);
+            }
+            throw new TypeError('Browser blocked');
+        });
+    }
+
+    it('holds the task during discovery and does not escalate titles without consent', async () => {
+        const fetchMock = pluginFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        const confirm = vi.fn(async () => {
+            expect(svc.isBusy()).toBe(true);
+            await expect(svc.startEnumeration({ wikiType: 'fandom', url: 'other' })).rejects.toMatchObject({ code: 'busy' });
+            return false;
+        });
+        const result = await svc.acquireWiki({ wikiType: 'fandom', url: 'testwiki', kind: 'index', confirmFullDownload: confirm });
+        expect(confirm).toHaveBeenCalledOnce();
+        expect(result.declined).toBe(true);
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/scrape'))).toBe(false);
+        expect(svc.isBusy()).toBe(false);
+    });
+
+    it('keeps plugin content usable with an explicit warning when persistence fails', async () => {
+        vi.stubGlobal('fetch', pluginFetch());
+        vi.spyOn(store, 'putPages').mockRejectedValueOnce(new store.WikiLibraryError('quota', 'Full'));
+        const result = await svc.acquireWiki({ wikiType: 'fandom', url: 'testwiki', kind: 'full' });
+        expect(result.saved).toBe(false);
+        expect(result.warning).toContain('Not saved');
+        expect(result.source.pages).toEqual(pages);
+        expect(result.source.content).toBe('# Kept\n\nUseful content');
+    });
+
+    it.each(['stop', 'cancel'])('%s during plugin acquisition keeps the shared task until it settles', async action => {
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const fetchMock = pluginFetch(gate);
+        vi.stubGlobal('fetch', fetchMock);
+        const run = svc.acquireWiki({ wikiType: 'fandom', url: 'testwiki', kind: 'full' });
+        const outcome = run.then(value => ({ value }), error => ({ error }));
+        await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/scrape'))).toBe(true));
+        expect(svc.isBusy()).toBe(true);
+        if (action === 'cancel') svc.cancelHard(); else svc.stopAndKeep();
+        expect(svc.isBusy()).toBe(true);
+        release();
+        const result = await outcome;
+        if (action === 'cancel') {
+            expect(result.error).toMatchObject({ code: 'aborted' });
+            expect(await store.listLibraries()).toEqual([]);
+        } else {
+            expect(result.value).toMatchObject({ stopped: true, saved: true, source: { pages } });
+        }
+        expect(svc.isBusy()).toBe(false);
+    });
+});
+
 function gpage(pageid, title, categories = [], length = 100) {
     return {
         pageid, ns: 0, title, length,
