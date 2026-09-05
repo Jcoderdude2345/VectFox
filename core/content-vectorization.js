@@ -12,7 +12,7 @@
 
 import { getContentType, getContentTypeDefaults, hasFeature } from './content-types.js';
 import { chunkText } from './chunking.js';
-import { insertVectorItems, purgeVectorIndex, getSavedHashes } from './core-vector-api.js';
+import { insertVectorItems, getSavedHashes } from './core-vector-api.js';
 import { setCollectionMeta, setCollectionLock, setCollectionCharacterLock, saveChunkMetadata } from './collection-metadata.js';
 import { registerCollection } from './collection-loader.js';
 import { getBackend } from '../backends/backend-manager.js';
@@ -29,7 +29,7 @@ import { extractLorebookKeywords, extractTextKeywords, extractChatKeywords, extr
 import { cleanText, cleanContentOrNull, cleanWikiNoise } from './text-cleaning.js';
 import { prepareLorebookContent } from './lorebook-content-preparer.js';
 import { extractGlossary, injectGlossary } from './glossary-extractor.js';
-import { getReformatCache, recordReformatVectorization, invalidateReformatCacheForCollections } from './reformat-store.js';
+import { getReformatCache, recordReformatVectorization } from './reformat-store.js';
 import { progressTracker } from '../ui/progress-tracker.js';
 import { extension_settings, getContext } from '../../../../extensions.js';
 import { getCurrentChatId } from '../../../../../script.js';
@@ -1043,9 +1043,6 @@ export async function deleteContentCollection(collectionId, callerSettings = nul
         if (detected) baseSettings = { vector_backend: detected };
     }
     const effectiveSettings = resolveEffectiveSettings(baseSettings);
-    await purgeVectorIndex(collectionId, effectiveSettings);
-    // The collection's vectors are gone — drop any Auto-Reformat freeze whose
-    // last vectorized copy lived here, so the next reformat is a real run.
-    invalidateReformatCacheForCollections([collectionId]);
-    log.lifecycle(`VectFox: Deleted collection: ${collectionId} (routed via ${effectiveSettings.vector_backend})`);
+    const { deleteCollection } = await import('./collection-removal.js');
+    return deleteCollection(collectionId, effectiveSettings);
 }

@@ -876,12 +876,8 @@ export class StandardBackend extends VectorBackend {
                     errors.push(`model="${model}": ${e.message}`);
                 }
             }
-            if (errors.length === discoveredModels.length) {
-                // All purge attempts failed — surface the error
-                throw new Error(`Failed to purge collection via plugin: ${errors.join('; ')}`);
-            }
             if (errors.length > 0) {
-                log.warn(`VectFox Standard: partial purge of ${collectionId}:`, errors);
+                throw new Error(`Incomplete collection purge via plugin: ${errors.join('; ')}`);
             }
             return;
         }

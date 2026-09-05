@@ -25,7 +25,6 @@ import {
     setCollectionMeta,
     isCollectionActiveForContext,
 } from './collection-metadata.js';
-import { purgeVectorIndex } from './core-vector-api.js';
 import { log } from './log.js';
 // Import from collection-ids.js - single source of truth for collection ID operations
 import {
@@ -235,115 +234,7 @@ export function unregisterCollection(collectionId) {
     }
 }
 
-/**
- * COMPLETE collection deletion - removes from ALL THREE stores:
- * 1. Vector backend (actual embeddings)
- * 2. Registry (collection tracking)
- * 3. Metadata (display names, settings, chunk info)
- *
- * This is the ONE function that should be called to fully delete a collection.
- * All other delete functions are partial and will leave ghosts.
- *
- * @param {string} collectionId - Collection ID to delete
- * @param {object} settings - VECTFOX settings (for backend routing)
- * @param {string} [registryKey] - Optional registry key (source:id format) if different from collectionId
- * @returns {Promise<{success: boolean, errors: string[], vectorsDeleted: boolean, registryDeleted: boolean, metadataDeleted: boolean}>}
- */
-export async function deleteCollection(collectionId, settings, registryKey = null) {
-    const errors = [];
-    let vectorsDeleted = false;
-    let registryDeleted = false;
-    let metadataDeleted = false;
-
-    log.verbose(`VectFox: Deleting collection ${collectionId} (registry key: ${registryKey || collectionId})`);
-
-    // Step 1: Delete vectors from backend (most important - actual data)
-    try {
-        await purgeVectorIndex(collectionId, settings);
-        vectorsDeleted = true;
-        log.verbose(`VectFox: ✓ Deleted vectors for ${collectionId}`);
-    } catch (error) {
-        errors.push(`Vectors: ${error.message}`);
-        log.warn(`VectFox: ✗ Failed to delete vectors for ${collectionId}:`, error.message);
-        // Continue anyway - registry/metadata cleanup is still valuable
-    }
-
-    // Step 2: Unregister from registry (try both formats)
-    try {
-        const keyToUnregister = registryKey || collectionId;
-        unregisterCollection(keyToUnregister);
-
-        // Also try the other format if they differ
-        if (registryKey && registryKey !== collectionId) {
-            unregisterCollection(collectionId);
-        }
-
-        registryDeleted = true;
-        log.verbose(`VectFox: ✓ Unregistered ${collectionId}`);
-    } catch (error) {
-        errors.push(`Registry: ${error.message}`);
-        log.warn(`VectFox: ✗ Failed to unregister ${collectionId}:`, error.message);
-    }
-
-    // Step 3: Delete metadata
-    try {
-        deleteCollectionMeta(collectionId);
-        metadataDeleted = true;
-        log.verbose(`VectFox: ✓ Deleted metadata for ${collectionId}`);
-    } catch (error) {
-        errors.push(`Metadata: ${error.message}`);
-        log.warn(`VectFox: ✗ Failed to delete metadata for ${collectionId}:`, error.message);
-    }
-
-    // Step 4: Clear EventBase window fingerprint cache if this is an EventBase collection.
-    // The UUID is always the last underscore-separated segment of the collection ID.
-    if (collectionId.startsWith(COLLECTION_PREFIXES.VECTFOX_EVENTBASE)) {
-        try {
-            const { clearExtractionCachesForChat } = await import('./eventbase-store.js');
-            const chatUUID = collectionId.split('_').pop();
-            // Drop both window + tip caches together. Leaving the tip stale makes the
-            // next re-vectorize fast-forward past every window (tip says "already at
-            // message N") and extract 0 events.
-            if (chatUUID) clearExtractionCachesForChat(chatUUID);
-        } catch {
-            // Best-effort — don't fail the whole delete if this breaks.
-        }
-    }
-
-    // Step 5: Invalidate any Auto-Reformat freeze whose last vectorized copy
-    // lived in this collection — otherwise the next Auto-Reformat of the same
-    // source "instantly completes" by reusing chunks whose vectors are gone.
-    if (vectorsDeleted || registryDeleted) {
-        try {
-            const { invalidateReformatCacheForCollections } = await import('./reformat-store.js');
-            invalidateReformatCacheForCollections([collectionId]);
-        } catch {
-            // Best-effort — don't fail the whole delete if this breaks.
-        }
-    }
-
-    const success = vectorsDeleted && registryDeleted && metadataDeleted;
-
-    if (success) {
-        log.verbose(`VectFox: ✓ Fully deleted collection ${collectionId}`);
-    } else {
-        // VEC-28: Warn about partial deletion to prevent zombie collections
-        const warningMsg = `VectFox: ⚠️ PARTIAL DELETION of ${collectionId} - may create zombie collection. Errors: ${errors.join(', ')}`;
-        log.error(warningMsg);
-        // Only treat as critical failure if ALL steps failed
-        if (!vectorsDeleted && !registryDeleted && !metadataDeleted) {
-            throw new Error(`Complete deletion failure for ${collectionId}: ${errors.join(', ')}`);
-        }
-    }
-
-    return {
-        success,
-        errors,
-        vectorsDeleted,
-        registryDeleted,
-        metadataDeleted,
-    };
-}
+export { deleteCollection } from './collection-removal.js';
 
 /**
  * Clears the entire registry (useful for debugging/reset)

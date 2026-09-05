@@ -139,8 +139,12 @@ export async function reindexLorebookNow(bookName) {
                 ...(meta.settings?.strategy ? { strategy: meta.settings.strategy } : {}),
                 ...(meta.settings?.chunkSize ? { chunkSize: meta.settings.chunkSize } : {}),
             };
-            const { collectionId } = resolveBackendForCollection(registryKey);
-            await deleteCollection(collectionId, resolveEffectiveSettings(carried), registryKey);
+            const { collectionId, backend } = resolveBackendForCollection(registryKey);
+            if (backend) carried.vector_backend = backend;
+            const removal = await deleteCollection(collectionId, resolveEffectiveSettings(carried), registryKey);
+            if (!removal.success) {
+                throw new Error(`Lorebook removal incomplete: ${removal.errors.join('; ')}`);
+            }
         }
 
         await vectorizeContent({

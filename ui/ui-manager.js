@@ -2141,6 +2141,11 @@ async function showAutoSyncConfirmModal(allMatches, settings) {
                 };
                 const result = await deleteCollection(ghost.collectionId, deleteSettings, ghost.registryKey);
 
+                if (!result.success) {
+                    toastr.warning(`Removal incomplete; retry deletion: ${result.errors.join(', ')}`, 'VectFox');
+                    return;
+                }
+
                 // Remove from UI
                 allMatches.splice(index, 1);
                 $(this).closest('.vectfox-collection-option').fadeOut(200, function() {
@@ -2152,11 +2157,7 @@ async function showAutoSyncConfirmModal(allMatches, settings) {
                     });
                 });
 
-                if (result.success) {
-                    toastr.success('Ghost collection deleted', 'VectFox');
-                } else {
-                    toastr.warning(`Partial deletion: ${result.errors.join(', ')}`, 'VectFox');
-                }
+                toastr.success('Ghost collection deleted', 'VectFox');
 
                 // If no collections left, close modal
                 if (allMatches.length === 0) {

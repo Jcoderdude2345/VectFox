@@ -1015,6 +1015,9 @@ export function renderCollections() {
 
     // Apply filters
     let filtered = browserState.collections.filter(c => {
+        // Cleanup may already have removed the locks used by these filters.
+        // Keep incomplete removals reachable until the user retries them.
+        if (c.removalIncomplete) return true;
         const scopeFilter = browserState.filters.scope;
         const lookupKey = c.registryKey || c.id;
 
@@ -1569,10 +1572,15 @@ function bindCollectionCardEvents() {
           collection.registryKey,
         );
 
-        // Remove from state
-        browserState.collections = browserState.collections.filter(
-          (c) => (c.registryKey || c.id) !== collectionKey,
-        );
+        // Keep incomplete removals available for retry, even if local registry
+        // cleanup succeeded and a discovery refresh would no longer show them.
+        if (result.success) {
+          browserState.collections = browserState.collections.filter(
+            (c) => (c.registryKey || c.id) !== collectionKey,
+          );
+        } else {
+          collection.removalIncomplete = true;
+        }
 
         // Re-render
         renderCollections();
@@ -1581,7 +1589,7 @@ function bindCollectionCardEvents() {
           toastr.success(`Deleted collection "${collection.name}"`, "VectFox");
         } else {
           toastr.warning(
-            `Partial deletion: ${result.errors.join(", ")}`,
+            `Removal incomplete; retry deletion: ${result.errors.join(", ")}`,
             "VectFox",
           );
         }
@@ -3741,6 +3749,8 @@ function bindBulkEvents() {
 
       let successCount = 0;
       let partialCount = 0;
+      let failedCount = 0;
+      const incomplete = [];
       for (const key of browserState.bulkSelected) {
         const collection = browserState.collections.find(
           (c) => (c.registryKey || c.id) === key,
@@ -3761,21 +3771,32 @@ function bindBulkEvents() {
           );
           if (result.success) {
             successCount++;
+            browserState.bulkSelected.delete(key);
+            browserState.collections = browserState.collections.filter(
+              (c) => (c.registryKey || c.id) !== key,
+            );
           } else {
-            partialCount++;
+            collection.removalIncomplete = true;
+            if (result.vectorsDeleted) partialCount++;
+            else failedCount++;
+            incomplete.push(`${collection.name || collection.id}: ${result.errors.join(', ')}`);
           }
         } catch (error) {
+          collection.removalIncomplete = true;
+          failedCount++;
+          incomplete.push(`${collection.name || collection.id}: ${error.message}`);
           console.error(`VectFox: Failed to delete ${collection.id}`, error);
         }
       }
 
-      browserState.bulkSelected.clear();
-      await refreshCollections();
+      // Preserve incomplete rows and their selection for another attempt.
+      renderCollections();
       renderBulkList();
+      updateBulkCount();
 
-      if (partialCount > 0) {
+      if (partialCount > 0 || failedCount > 0) {
         toastr.warning(
-          `Deleted ${successCount}, partial: ${partialCount}`,
+          `Deleted ${successCount}, partial: ${partialCount}, failed: ${failedCount}. Retry selected collections. ${incomplete.join('; ')}`,
           "VectFox",
         );
       } else {

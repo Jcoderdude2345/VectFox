@@ -48,7 +48,7 @@ vi.mock('../core/collection-metadata.js', () => ({
 vi.mock('../core/collection-loader.js', () => ({
     getCollectionListing: vi.fn(() => []),
     getCollectionRegistry: vi.fn(() => _state.registry),
-    deleteCollection: vi.fn(async () => {}),
+    deleteCollection: vi.fn(async () => ({ success: true, errors: [] })),
 }));
 vi.mock('../core/collection-ids.js', () => ({
     parseRegistryKey: vi.fn((key) => ({ collectionId: key })),
@@ -187,6 +187,15 @@ describe('resolveLiveEntries', () => {
 // ============================================================================
 
 describe('lorebook invalidation hook', () => {
+    it('does not reindex after incomplete collection removal', async () => {
+        _state.registry = ['standard:vf_lorebook_eldoria_npcs_1700000000000'];
+        deleteCollection.mockResolvedValueOnce({ success: false, errors: ['Vectors unavailable'] });
+        await expect(reindexLorebookNow('Eldoria NPCs')).rejects.toThrow('Lorebook removal incomplete');
+        expect(vectorizeContent).not.toHaveBeenCalled();
+        // The single-flight guard is released so the caller can retry.
+        await expect(reindexLorebookNow('Eldoria NPCs')).resolves.toBe(true);
+    });
+
     it('findLorebookRegistryKey matches sanitized lorebook names', () => {
         _state.registry = ['standard:vf_lorebook_eldoria_npcs_1700000000000'];
         expect(findLorebookRegistryKey('Eldoria NPCs')).toBe('standard:vf_lorebook_eldoria_npcs_1700000000000');

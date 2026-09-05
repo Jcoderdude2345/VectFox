@@ -413,6 +413,18 @@ describe('StandardBackend', () => {
     });
 
     describe('purgeVectorIndex', () => {
+        it('rejects partial model removal after attempting every discovered model', async () => {
+            backend.pluginAvailable = true;
+            fetchMock
+                .mockResolvedValueOnce(mockFetchResponse({}))
+                .mockResolvedValueOnce(mockFetchError(500, 'Purge failed'))
+                .mockResolvedValueOnce(mockFetchResponse({}));
+            await expect(backend.purgeVectorIndex('test-collection', {
+                ...defaultSettings, _discoveredModels: ['a', 'b', 'c'],
+            })).rejects.toThrow('Incomplete collection purge');
+            expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).model)).toEqual(['a', 'b', 'c']);
+        });
+
         it('should purge collection successfully', async () => {
             fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
 
