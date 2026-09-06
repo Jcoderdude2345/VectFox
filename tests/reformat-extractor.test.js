@@ -654,3 +654,67 @@ describe('expandOversizedChunk', () => {
         }
     });
 });
+
+
+describe('reference information preservation', () => {
+    it('supplies distant acronym definitions to transcript batches and grounds their output', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => mockChatCompletionResponse([
+            { entry_type: 'concept', name: 'Permits', body: 'FHOB permits expire after 30 days unless renewed.' },
+        ]));
+        const text = 'FHOB stands for Federal Hero Oversight Bureau.\n\n' + 'Background discussion. '.repeat(30) + '\n\n00:30 Speaker: FHOB permits expire after 30 days unless renewed.';
+        const result = await reformatDocument({ text, contentType: 'youtube', settings: baseSettings({ reformat_enable_repair_pass: false }) });
+        const laterPrompt = fetchMock.mock.calls.map(extractPrompt).find(p => p.includes('TEXT:\n00:30'));
+        expect(laterPrompt).toContain('SOURCE GLOSSARY');
+        expect(laterPrompt).toContain('Federal Hero Oversight Bureau');
+        expect(result.chunks[0].body).toContain('Federal Hero Oversight Bureau');
+        expect(result.chunks[0].provenance.some(p => p.timestamps.includes('00:30'))).toBe(true);
+    });
+
+    it('keeps homonymous records and definitions separate across wiki pages', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => mockChatCompletionResponse([
+            { entry_type: 'organization', name: 'FHOB', body: 'FHOB handles permits.' },
+        ]));
+        const text = '# First\nFederal Hero Oversight Bureau (FHOB) handles permits.\n# Second\nForeign Hero Operations Board (FHOB) handles permits.';
+        const result = await reformatDocument({ text, contentType: 'wiki', settings: baseSettings({ reformat_batch_chars: 6000, reformat_enable_repair_pass: false }) });
+        expect(result.chunks).toHaveLength(2);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(result.chunks[0].body).toContain('Federal Hero Oversight Bureau');
+        expect(result.chunks[0].aliases).toContain('Federal Hero Oversight Bureau');
+        expect(result.chunks[1].body).toContain('Foreign Hero Operations Board');
+        expect(result.chunks[0].sourceId).not.toBe(result.chunks[1].sourceId);
+        expect(result.chunks[1].provenance[0].title).toBe('Second');
+    });
+
+    it('grounds every split chunk while retaining provenance and exceptions', async () => {
+        const provenance = [{ sourceId: '0', title: 'Permits', start: 0, end: 300 }];
+        const glossary = [{ acronym: 'FHOB', fullName: 'Federal Hero Oversight Bureau' }];
+        const record = { name: 'Permits', provenance, glossary, body: Array.from({ length: 8 }, (_, i) => `FHOB permit ${i} is not valid unless renewed after 30 days.`).join('\n\n') };
+        const pieces = await expandOversizedChunk(record, 110);
+        expect(pieces.length).toBeGreaterThan(1);
+        for (const piece of pieces) {
+            expect(piece.body).toContain('Federal Hero Oversight Bureau');
+            expect(piece.provenance).toEqual(provenance);
+        }
+        expect(pieces.map(p => p.body).join(' ')).toContain('not valid unless renewed');
+    });
+});
+
+
+it('links uniquely named entries across wiki pages without merging their provenance', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (...args) => {
+        const prompt = extractPrompt(args);
+        if (prompt.includes('CATALOG:')) return mockChatCompletionResponse([{ source: 'Council', target: 'Harbor', type: 'located in' }]);
+        return mockChatCompletionResponse([prompt.includes('SOURCE TITLE: "Council"')
+            ? { entry_type: 'organization', name: 'Council', body: 'Council is located in Harbor.' }
+            : { entry_type: 'location', name: 'Harbor', body: 'Harbor is a city.' }]);
+    });
+    const text = '# Council\nCouncil is located in Harbor.\n# Harbor\nHarbor is a city.';
+    const result = await reformatDocument({ text, contentType: 'wiki', settings: baseSettings({ reformat_batch_chars: 6000, reformat_enable_repair_pass: false, reformat_enable_linking_pass: true }) });
+    expect(result.chunks).toHaveLength(2);
+    expect(result.chunks.find(r => r.name === 'Council').relationships).toContainEqual({ target: 'Harbor', type: 'located in' });
+    for (const record of result.chunks) {
+        const span = record.provenance[0];
+        expect(span.granularity).toBe('batch');
+        expect(text.slice(span.start, span.end)).toContain(record.name);
+    }
+});

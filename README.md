@@ -626,3 +626,11 @@ GPLv3 License — see LICENSE.
 ---
 
 *"Let's make memory hardcore!"* 🦊✨
+
+### Auto-Reformat reference processing
+
+Auto-Reformat accepts Documents, URLs, Wikis, and YouTube transcripts. The extraction prompt preserves attribution, uncertainty, chronology, conditions, exceptions, and substantive procedures. Continuation batches may add facts to previously extracted entities. Coverage repair checks entry bodies rather than counting keywords or traits as retained facts.
+
+Acronym Glossary Injection applies to all four reference source types. Explicit definitions (including “ABC stands for Full Name”) are supplied before extraction and added to independently retrieved chunks when needed. Conflicting definitions remain unresolved. Wiki top-level page headings establish separate source scopes, preventing acronym meanings and same-named entries from being merged across pages. Ordinary wiki chunks with ambiguous page identity are left unchanged rather than assigned another page's definition.
+
+New Auto-Reformat records retain prepared-source offsets, headings, and available timestamp labels through merging and splitting. Offsets identify extraction batches when the batch is an exact source substring; otherwise they identify the enclosing source, explicitly marked in metadata. These are provenance references, not proof that every generated claim is supported. Source details appear in review. Accepted results remain frozen; re-run Auto-Reformat to apply these improvements to older results. Existing custom prompts remain in effect.

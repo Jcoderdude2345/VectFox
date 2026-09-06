@@ -340,7 +340,7 @@ describe('buildReformatPrompt', () => {
         });
         expect(prompt).toMatch(/continuation of section "Notable US Hero Agencies"/);
         expect(prompt).toContain('Columbia, Bulwark');
-        expect(prompt).toMatch(/Do NOT re-emit them/);
+        expect(prompt).toContain('Emit additional facts about these entries under the same names');
     });
 
     it('shows "(none yet)" when the continuation has no prior names', () => {
@@ -639,4 +639,19 @@ describe('buildRepairPrompt', () => {
         const prompt = buildRepairPrompt(flagged, {});
         expect(prompt).toContain('Entries already extracted: (none)');
     });
+});
+
+
+it('does not count metadata-only facts as body coverage', () => {
+    const text = '## Licensing\nThe Federal Hero Oversight Bureau requires 500 crowns in 1147 under the Edict of Coals. Permits expire in 1148.';
+    const entries = [{ name: text, aliases: [text], traits: [text], keywords: [{ text, importance: 10 }], body: 'Licensing is discussed.' }];
+    expect(computeBatchCoverage(text, entries)).not.toEqual([]);
+    expect(computeBatchCoverage(text, [{ body: text }])).toEqual([]);
+});
+
+
+it('preserves dollar replacement sequences in source material verbatim', () => {
+    const text = 'Literal $& and $$ and $` and $\' must survive.';
+    expect(buildReformatPrompt(text, { customPrompt: '{{text}}' })).toBe(text);
+    expect(buildRepairPrompt([{ title: 'Syntax', text, missingFacts: [] }], { customPrompt: '{{text}}' })).toBe(text);
 });

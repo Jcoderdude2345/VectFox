@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractGlossary, injectGlossary } from '../core/glossary-extractor.js';
+import { extractGlossary, injectGlossary, groundReferenceChunks, splitReferenceSources } from '../core/glossary-extractor.js';
 
 describe('extractGlossary', () => {
     it('extracts a simple "Full Name (ACRONYM)" definition', () => {
@@ -36,15 +36,13 @@ describe('extractGlossary', () => {
         expect(glossary).toEqual([{ acronym: 'FHOB', fullName: 'Federal Hero Oversight Bureau' }]);
     });
 
-    it('keeps the first valid definition when the acronym is defined-looking twice', () => {
+    it('leaves conflicting explicit definitions unresolved', () => {
         const text = [
             'The International Spark Research Council (ISRC) sets classification standards.',
             'Some other body, Innovative Space Research Committee (ISRC), is unrelated.',
         ].join('\n\n');
         const glossary = extractGlossary(text);
-        // Leading "The" is kept — it's part of the matched word run and reads
-        // naturally; only the initials computation ignores it as a stopword.
-        expect(glossary).toEqual([{ acronym: 'ISRC', fullName: 'The International Spark Research Council' }]);
+        expect(glossary).toEqual([]);
     });
 
     it('tolerates stopwords inside the phrase via the initials check', () => {
@@ -138,5 +136,36 @@ describe('injectGlossary', () => {
     it('returns an empty array for non-array chunks input', () => {
         expect(injectGlossary(null, glossary)).toEqual([]);
         expect(injectGlossary(undefined, glossary)).toEqual([]);
+    });
+});
+
+
+describe('reference-source grounding', () => {
+    it('recognizes explicit transcript definitions, including lowercase expansions', () => {
+        expect(extractGlossary('00:12 Speaker: FHOB stands for federal hero oversight bureau.')).toEqual([
+            { acronym: 'FHOB', fullName: 'Federal hero oversight bureau' },
+        ]);
+        expect(extractGlossary('FHOB means Federal Hero Oversight Bureau.')).toHaveLength(1);
+        expect(extractGlossary('FHOB means something unknown.')).toEqual([]);
+    });
+
+    it('isolates conflicting wiki definitions and preserves source offsets', () => {
+        const text = '# First\nFederal Hero Oversight Bureau (FHOB).\nFHOB approves permits.\n# Second\nForeign Hero Operations Board (FHOB).\nFHOB rejects permits.';
+        const sources = splitReferenceSources(text, 'wiki');
+        expect(sources).toHaveLength(2);
+        expect(text.slice(sources[1].start, sources[1].end)).toBe(sources[1].text);
+        const result = groundReferenceChunks([
+            { text: 'FHOB approves permits.', metadata: { pageTitle: 'First' } },
+            { text: 'FHOB rejects permits.', metadata: { pageTitle: 'Second' } },
+        ], text, 'wiki');
+        expect(result[0].text).toContain('Federal Hero Oversight Bureau');
+        expect(result[1].text).toContain('Foreign Hero Operations Board');
+        expect(result[1].text).not.toContain('Federal Hero Oversight Bureau');
+    });
+
+    it('does not leak definitions into another wiki page or an unidentified mixed chunk', () => {
+        const text = '# First\nFederal Hero Oversight Bureau (FHOB).\n# Second\nFHOB has an unknown meaning.';
+        const chunks = [{ text: 'FHOB has an unknown meaning.', metadata: { pageTitle: 'Second' } }, { text: 'FHOB mixed chunk.' }];
+        expect(groundReferenceChunks(chunks, text, 'wiki')).toEqual(chunks);
     });
 });

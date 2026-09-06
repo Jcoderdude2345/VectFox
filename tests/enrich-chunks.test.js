@@ -149,3 +149,15 @@ describe('enrichChunks — entryName from wiki pageTitle', () => {
         expect(result.metadata.entryName).toBe('Titled Page');
     });
 });
+
+
+it('retains reformat provenance when preparing transcript chunks for retrieval', () => {
+    const provenance = [{ sourceId: '0', start: 0, end: 100, granularity: 'batch', timestamps: ['00:30'] }];
+    const result = enrichOne({
+        text: 'Federal Hero Oversight Bureau (FHOB) permits are not valid unless renewed.',
+        metadata: { entry_type: 'concept', name: 'Permits', sourceId: '0', provenance },
+    }, 'youtube');
+    expect(result.metadata.provenance).toEqual(provenance);
+    expect(result.metadata.sourceId).toBe('0');
+    expect(result.text).toContain('not valid unless renewed');
+});

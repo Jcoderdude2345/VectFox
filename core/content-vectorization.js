@@ -27,7 +27,7 @@ import {
 import { extractLorebookKeywords, extractTextKeywords, extractBM25Keywords, dedupeKeywordsByStem } from './keyword-boost.js';
 import { cleanContentOrNull, cleanWikiNoise } from './text-cleaning.js';
 import { prepareLorebookContent } from './lorebook-content-preparer.js';
-import { extractGlossary, injectGlossary } from './glossary-extractor.js';
+import { groundReferenceChunks } from './glossary-extractor.js';
 import { getReformatCache, recordReformatVectorization } from './reformat-store.js';
 import { progressTracker } from '../ui/progress-tracker.js';
 import { extension_settings, getContext } from '../../../../extensions.js';
@@ -104,7 +104,7 @@ export async function vectorizeContent({ contentType, source, settings, abortSig
         // chunk set. See core/reformat-store.js for the freeze mechanism and
         // ui/reformat-review.js for how chunks get into the cache in the first
         // place (already {text, metadata} shaped, ready for enrichChunks() below).
-        const REFORMAT_SUPPORTED_TYPES = ['document', 'url', 'wiki'];
+        const REFORMAT_SUPPORTED_TYPES = ['document', 'url', 'wiki', 'youtube'];
         let chunks;
         let usedFrozenReformat = false;
         if (REFORMAT_SUPPORTED_TYPES.includes(contentType) && settings.reformat?.accepted && settings.reformat?.sourceHash) {
@@ -158,12 +158,11 @@ export async function vectorizeContent({ contentType, source, settings, abortSig
         // retrieved alongside a chunk that only uses the bare acronym, the model has
         // no grounding for what it means. Prepend the definition to any chunk that
         // references an acronym without it. See core/glossary-extractor.js.
-        if (contentType === 'document' && settings.document_glossary_injection !== false) {
-            const glossary = extractGlossary(preparedContent.text || '');
-            if (glossary.length > 0) {
-                chunks = injectGlossary(chunks, glossary);
-                log.verbose(`VectFox: Glossary injection found ${glossary.length} acronym(s): ${glossary.map(g => g.acronym).join(', ')}`);
-            }
+        if (REFORMAT_SUPPORTED_TYPES.includes(contentType) && !usedFrozenReformat && settings.document_glossary_injection !== false) {
+            const glossaryText = Array.isArray(preparedContent.text)
+                ? preparedContent.text.map(c => typeof c === 'string' ? c : c.text || '').join('\n\n')
+                : preparedContent.text || '';
+            chunks = groundReferenceChunks(chunks, glossaryText, contentType);
         }
 
         // Log chunking results for debugging

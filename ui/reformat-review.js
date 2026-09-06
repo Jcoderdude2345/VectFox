@@ -240,6 +240,7 @@ function _recordCardHtml(record) {
                         `<option value="${t}" ${t === record.entry_type ? 'selected' : ''}>${t}</option>`).join('')}
                 </select>
             </div>
+            ${record.provenance?.length ? `<div class="vectfox-rr-keyword-advisory">Source: ${_escapeHtml([...new Set(record.provenance.map(p => [p.title || 'Prepared source', ...(p.headings || []), ...(p.timestamps || [])].join(' / ')))].join('; '))}</div>` : ''}
             ${warningHtml}
             ${keywordAdvisoryHtml}
             <div class="vectfox-rr-field-row">

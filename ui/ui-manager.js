@@ -622,14 +622,14 @@ export function renderSettings(containerId, settings, callbacks) {
 
                             <label class="checkbox_label" for="VectFox_document_glossary_injection" style="margin-top:12px;">
                                 <input type="checkbox" id="VectFox_document_glossary_injection" />
-                                <span>Acronym Glossary Injection (Documents)</span>
+                                <span>Acronym Glossary Injection (Reference Sources)</span>
                             </label>
-                            <small class="VectFox_hint">When vectorizing a <b>Document</b>, scan it once for "Full Name (ACRONYM)" definitions and prepend the matching definition to any chunk that references the bare acronym without it. Fixes retrieval handing the model an ungrounded acronym it then has to guess at.</small>
+                            <small class="VectFox_hint">When vectorizing a <b>Document, URL, Wiki, or Transcript</b>, use explicit acronym definitions to ground extraction and chunks. Wiki pages keep separate meanings; conflicting definitions remain unresolved. Supports "Full Name (ACRONYM)" and spoken "ACRONYM stands for Full Name" forms. Fixes retrieval handing the model an ungrounded acronym it then has to guess at.</small>
 
                             <!-- Auto-Reformat (LLM) -->
                             <p class="vectfox-section-label" style="font-weight:600; margin-top:16px; margin-bottom:8px;">Auto-Reformat (LLM)</p>
                             <small class="VectFox_hint" style="display:block; margin-bottom:8px;">
-                                Optional, per-item LLM pass offered in <b>Vectorize Content</b> for Document/URL/Wiki sources. Reads the source, splits it into clean per-entity/per-topic entries, and uses those as the final chunks — you review and accept every entry before anything is stored. Leave Provider/Model blank to inherit from <b>Summarize Before Store</b> settings.
+                                Optional, per-item LLM pass offered in <b>Vectorize Content</b> for Document/URL/Wiki/Transcript sources. Reads the source, splits it into clean per-entity/per-topic entries, and uses those as the final chunks — you review and accept every entry before anything is stored. Leave Provider/Model blank to inherit from <b>Summarize Before Store</b> settings.
                             </small>
 
                             <div class="vectfox-form-group">
@@ -2534,7 +2534,7 @@ function bindSettingsEvents(settings, callbacks) {
             saveSettingsDebounced();
         });
 
-    // ─── Auto-Reformat (Document/URL/Wiki LLM restructuring) ───────────────
+    // ─── Auto-Reformat (Document/URL/Wiki/Transcript LLM restructuring) ───────────────
     // Mirrors the AgentMode inherit-from-summarizer pattern above. No dedicated
     // API-key fields — reuses the same shared OpenRouter/vLLM key slots.
     const updateReformatProviderUI = (provider) => {
@@ -4162,7 +4162,7 @@ function bindSettingsEvents(settings, callbacks) {
         });
     $('#VectFox_insert_batch_size_value').text(settings.insert_batch_size || 50);
 
-    // Acronym glossary injection (Documents) — see core/glossary-extractor.js
+    // Acronym glossary injection (reference sources) — see core/glossary-extractor.js
     $('#VectFox_document_glossary_injection')
         .prop('checked', settings.document_glossary_injection !== false)
         .on('change', function() {

@@ -238,7 +238,7 @@ function createModal() {
                         </div>
                     </div>
 
-                    <!-- Step 2.5: Auto-Reformat (Optional, Document/URL/Wiki only) -->
+                    <!-- Step 2.5: Auto-Reformat (Optional, Document/URL/Wiki/Transcript only) -->
                     <div class="vectfox-cv-section vectfox-cv-reformat-section vectfox-cv-subsequent" id="vectfox_cv_reformat_section" style="display:none;">
                         <div class="vectfox-cv-section-header">
                             <span class="vectfox-cv-step-number"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
@@ -383,7 +383,7 @@ function updateUIForContentType() {
     // Update source section
     updateSourceSection(type);
 
-    // Auto-Reformat section (Document/URL/Wiki only) — must run before
+    // Auto-Reformat section (Document/URL/Wiki/Transcript only) — must run before
     // updateChunkingSection() so the latter can see currentSettings.reformat
     // state for the current content type when deciding whether to show the
     // strategy dropdown or the "handled by Auto-Reformat" message.
@@ -892,10 +892,10 @@ function renderYouTubeSource(type) {
  * Updates chunking strategy section
  */
 // ============================================================================
-// AUTO-REFORMAT (Document/URL/Wiki only)
+// AUTO-REFORMAT (Document/URL/Wiki/Transcript only)
 // ============================================================================
 
-const REFORMAT_SUPPORTED_TYPES = ['document', 'url', 'wiki'];
+const REFORMAT_SUPPORTED_TYPES = ['document', 'url', 'wiki', 'youtube'];
 
 function isReformatSupportedType() {
     return REFORMAT_SUPPORTED_TYPES.includes(currentContentType);
@@ -1166,6 +1166,9 @@ async function _finalizeReformatAccept({ run, contentType, acceptedRecords, sour
                         chunkIndex: shapedChunks.length,
                         totalChunks: 0, // patched below once the final count is known
                         strategy: 'llm_reformat',
+                        provenance: piece.provenance,
+                        sourceUrl: run.snapshot.source.url || '',
+                        sourceId: piece.sourceId,
                         entry_type: piece.entry_type,
                         name: piece.name,
                         aliases: piece.aliases,
@@ -1186,7 +1189,7 @@ async function _finalizeReformatAccept({ run, contentType, acceptedRecords, sour
         run.assertCurrent();
         if (previous?.chunks?.length) {
             // Re-running Auto-Reformat produces a new, non-deterministic generation.
-            // Document/URL/Wiki vectorization always mints a brand-new collection per
+            // Document/URL/Wiki/Transcript vectorization always mints a brand-new collection per
             // run (there's no "same source → same collection" concept for these types,
             // unlike chat), so re-running can't silently duplicate data inside one
             // collection — but if the PREVIOUS generation was already vectorized into

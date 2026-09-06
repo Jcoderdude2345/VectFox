@@ -2,7 +2,7 @@
  * ============================================================================
  * AUTO-REFORMAT EXTRACTOR
  * ============================================================================
- * Calls an LLM (OpenRouter or vLLM) to restructure Document/URL/Wiki source
+ * Calls an LLM (OpenRouter or vLLM) to restructure Document/URL/Wiki/Transcript source
  * text into structured, entity-tagged reformatted chunks (see
  * core/reformat-schema.js for the record shape).
  *
@@ -37,7 +37,14 @@ import {
     computeKeywordVerification,
     normalizeForMatch,
 } from './reformat-schema.js';
+import { extractGlossary, injectGlossary, splitReferenceSources } from './glossary-extractor.js';
 import { log } from './log.js';
+
+function glossaryNote(batch) {
+    const definitions = (batch.glossary || []).filter(g => new RegExp(`\\b${g.acronym}\\b`).test(batch.text));
+    const title = batch.provenance?.title ? `SOURCE TITLE: ${JSON.stringify(batch.provenance.title)}\n` : '';
+    return title + (definitions.length ? `SOURCE GLOSSARY (explicit definitions; use only to resolve references):\n${JSON.stringify(definitions)}\n\n` : '');
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -471,14 +478,22 @@ function _ingestReply(reply, batch, { results, alreadyExtractedNames, settings, 
         if (errors.length > 0) {
             log.warn(`[Auto-Reformat] ${batchLabel}, item ${j}: coercion warnings — ${errors.join('; ')}`);
         }
+        const name = normalizeForMatch(chunk.name);
+        const definitions = (batch.glossary || []).filter(g => name === normalizeForMatch(g.fullName) || name === normalizeForMatch(g.acronym));
+        chunk.aliases = _unionStrings(chunk.aliases, definitions.flatMap(g => [g.acronym, g.fullName]))
+            .filter(alias => normalizeForMatch(alias) !== name);
         validatedForBatch.push(chunk);
     }
 
-    const verification = computeNameVerification(validatedForBatch, batch.text, threshold);
+    const verification = computeNameVerification(validatedForBatch, batch.text + glossaryNote(batch), threshold);
     const keywordVerification = computeKeywordVerification(validatedForBatch, batch.text);
     validatedForBatch.forEach((chunk, j) => {
         results.push({
             ...chunk,
+            body: injectGlossary([chunk.body], batch.glossary)[0],
+            sourceId: batch.sourceId,
+            provenance: batch.provenance ? [batch.provenance] : [],
+            glossary: batch.glossary || [],
             _nameGrounded: verification[j]?.nameGrounded ?? true,
             _ungroundedAliases: verification[j]?.ungroundedAliases ?? [],
             _ungroundedKeywords: keywordVerification[j]?.ungroundedKeywords ?? [],
@@ -514,7 +529,7 @@ async function _processChain(chain, settings, chainIndex, warnings, execution) {
         const batchContext = batch.continuation
             ? { sectionTitle: batch.continuation.sectionTitle, alreadyExtractedNames: [...alreadyExtractedNames] }
             : null;
-        const prompt = buildReformatPrompt(batch.text, { customPrompt: settings.reformat_custom_prompt, batchContext });
+        const prompt = glossaryNote(batch) + buildReformatPrompt(batch.text, { customPrompt: settings.reformat_custom_prompt, batchContext });
 
         try {
             const { reply, finishReason } = await _callProviderWithRetry(prompt, settings, chainIndex, execution);
@@ -539,7 +554,7 @@ async function _processChain(chain, settings, chainIndex, warnings, execution) {
         const flaggedTitles = flagged.map(s => `"${s.title}"`).join(', ');
         log.lifecycle(`[Auto-Reformat] ${batchLabel}: ${flagged.length} under-captured section(s) (${flaggedTitles}) — issuing repair call`);
         try {
-            const repairPrompt = buildRepairPrompt(flagged, {
+            const repairPrompt = glossaryNote(batch) + buildRepairPrompt(flagged, {
                 customPrompt: settings.reformat_custom_prompt,
                 alreadyExtractedNames: [...alreadyExtractedNames],
             });
@@ -665,7 +680,7 @@ export function mergeDuplicateEntities(chunks) {
     const merged = [];
 
     for (const record of chunks) {
-        const keys = _entityKeys(record).map(k => `${record?.entry_type || 'other'}::${k}`);
+        const keys = _entityKeys(record).map(k => `${record?.sourceId || ''}::${record?.entry_type || 'other'}::${k}`);
         const existing = keys.map(k => byKey.get(k)).find(Boolean);
 
         if (!existing) {
@@ -685,6 +700,7 @@ export function mergeDuplicateEntities(chunks) {
 
         if (!existing.affiliation && record.affiliation) existing.affiliation = record.affiliation;
         existing.body = _mergeBodies(existing.body, record.body);
+        existing.provenance = [...new Map([...(existing.provenance || []), ...(record.provenance || [])].map(p => [JSON.stringify(p), p])).values()];
 
         const relSeen = new Set((existing.relationships || []).map(_relationshipKey));
         for (const rel of record.relationships || []) {
@@ -726,7 +742,7 @@ export function mergeDuplicateEntities(chunks) {
  * each extraction batch only knows its own text, so a connection between an
  * entity extracted in batch 2 and one extracted in batch 7 is invisible to
  * both calls. This pass re-reads each batch's text alongside a catalog of
- * EVERY merged entity in the document and asks only for {source, target, type}
+ * uniquely named entities across sources and local entities and asks only for {source, target, type}
  * triples between catalog entries.
  *
  * Hallucination guard: a triple is applied only when BOTH source and target
@@ -746,16 +762,11 @@ export function mergeDuplicateEntities(chunks) {
  * @returns {Promise<{applied: number, dropped: number}>}
  */
 async function _runLinkingPass({ batches, records, settings, warnings, concurrency, execution, abortSignal = null, onTick = null }) {
-    const catalog = records.map(r => ({ name: r.name, entry_type: r.entry_type, aliases: r.aliases || [] }));
-
-    /** @type {Map<string, object>} lowercased name/alias → record (first registration wins) */
-    const resolver = new Map();
-    for (const r of records) {
-        for (const key of _entityKeys(r)) {
-            if (!resolver.has(key)) resolver.set(key, r);
-        }
+    const nameCounts = new Map();
+    for (const record of records) {
+        const key = record.name.toLowerCase();
+        nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
     }
-
     let applied = 0;
     let dropped = 0;
 
@@ -766,7 +777,15 @@ async function _runLinkingPass({ batches, records, settings, warnings, concurren
             throw err;
         }
         try {
-            const prompt = buildLinkingPrompt(batch.text, catalog);
+            // Local homonyms retain their page meaning; uniquely named entries
+            // elsewhere remain available for supported cross-page connections.
+            const scopedRecords = records.filter(r => r.sourceId === batch.sourceId || nameCounts.get(r.name.toLowerCase()) === 1);
+            const catalog = scopedRecords.map(r => ({ name: r.name, entry_type: r.entry_type, aliases: r.aliases || [] }));
+            const resolver = new Map();
+            for (const record of scopedRecords) {
+                for (const key of _entityKeys(record)) resolver.set(key, resolver.has(key) && resolver.get(key) !== record ? null : record);
+            }
+            const prompt = glossaryNote(batch) + buildLinkingPrompt(batch.text, catalog);
             const { reply } = await _callProviderWithRetry(prompt, settings, i, execution);
             const triples = _parseReformatArray(reply, i, ['source', 'target']);
 
@@ -827,7 +846,20 @@ export async function reformatDocument({ text, contentType, settings, onProgress
     }
 
     const targetChars = settings.reformat_batch_chars || DEFAULT_BATCH_CHARS;
-    const batches = await _buildBatches(text, targetChars);
+    const batches = [];
+    for (const source of splitReferenceSources(text, contentType)) {
+        const glossary = settings.document_glossary_injection !== false ? extractGlossary(source.text) : [];
+        const packed = await _buildBatches(source.text, targetChars);
+        let cursor = 0;
+        for (const batch of packed) {
+            const offset = source.text.indexOf(batch.text, cursor);
+            if (offset >= 0) cursor = offset + batch.text.length;
+            batch.sourceId = source.id;
+            batch.provenance = { sourceId: source.id, title: source.title, start: offset >= 0 ? source.start + offset : source.start, end: offset >= 0 ? source.start + offset + batch.text.length : source.end, granularity: offset >= 0 ? 'batch' : 'source', timestamps: [...batch.text.matchAll(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g)].map(m => m[0]), headings: [...batch.text.matchAll(/^#{1,6} (.+)/gm)].map(m => m[1]) };
+            batch.glossary = glossary;
+            batches.push(batch);
+        }
+    }
     if (batches.length === 0) {
         return { chunks: [], warnings: ['No content found to reformat.'], batchesProcessed: 0, batchesFailed: 0, totalBatches: 0 };
     }
@@ -915,7 +947,7 @@ export async function expandOversizedChunk(chunk, maxBodyChars) {
     const total = subChunks.length;
     return subChunks.map((sc, i) => ({
         ...chunk,
-        body: typeof sc === 'string' ? sc : sc.text,
+        body: injectGlossary([typeof sc === 'string' ? sc : sc.text], chunk.glossary)[0],
         subChunkIndex: i,
         subChunkTotal: total,
     }));

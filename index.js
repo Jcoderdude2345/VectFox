@@ -76,7 +76,7 @@ const defaultSettings = {
 
     // VEC-6: Batch insert optimization
     insert_batch_size: 50, // Chunks per insert batch (50-100 recommended)
-    document_glossary_injection: true, // Document content type only: prepend "Full Name (ACRONYM)" definitions to chunks that reference a bare acronym without it. See core/glossary-extractor.js.
+    document_glossary_injection: true, // Reference sources (legacy setting key): prepend "Full Name (ACRONYM)" definitions to chunks that reference a bare acronym without it. See core/glossary-extractor.js.
     togetherai_model: 'togethercomputer/m2-bert-80M-32k-retrieval',
     openai_model: 'text-embedding-ada-002',
     electronhub_model: 'text-embedding-3-small',
@@ -320,9 +320,9 @@ const defaultSettings = {
     agentic_retrieval_timeout_ms: 30000,               // Planner LLM call timeout (matches summarize default; some models need >5s)
     agentic_filters_enabled: true,                     // Apply planner-emitted *_any / importance_gte filters (Phase 1.5)
 
-    // ─── Auto-Reformat (Document/URL/Wiki) ──────────────────────────────
+    // ─── Auto-Reformat (Document/URL/Wiki/Transcript) ──────────────────────────────
     // Optional, per-session LLM pass offered in Vectorize Content for
-    // Document/URL/Wiki sources. Reads the source, classifies content into
+    // Document/URL/Wiki/Transcript sources. Reads the source, classifies content into
     // named-entity vs. topic/lore records via a self-tagged schema, and
     // emits the final chunks directly (bypassing the mechanical strategy
     // picker for that run) once the user reviews and accepts a full
