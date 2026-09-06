@@ -323,71 +323,8 @@ function evaluateMessageCountCondition(rule, context) {
 // - frequency: Activation limits/cooldown
 // ============================================================================
 
-/**
- * Processes chunk links and returns chunks that need to be included/boosted
- *
- * Link modes:
- * - force: Target chunk MUST be included if source chunk is in results
- * - soft:  Target chunk gets a score boost if source chunk is in results
- *
- * Each chunk defines its own links independently. For two-way linking,
- * add links on both chunks. For one-way, only add on the source chunk.
- *
- * @param {object[]} chunks Array of chunks from search results
- * @param {object} chunkMetadataMap Plain object of hash -> chunk metadata (includes chunkLinks)
- * @param {number} softBoost Score boost for soft links (default 0.15)
- * @returns {object} { chunks: processedChunks, hardLinkedHashes: Set }
- */
-export function processChunkLinks(chunks, chunkMetadataMap, softBoost = 0.15) {
-    const resultHashes = new Set(chunks.map(c => c.hash));
-    const hardLinkedHashes = new Set();
-    const softBoosts = new Map(); // hash -> total boost
-
-    // First pass: collect all force links and soft boosts.
-    // Links use the visualizer's shape: chunkLinks: [{ targetHash, mode: 'force'|'soft' }]
-    // (the link editor radio writes exactly these values — see ui/chunk-visualizer.js).
-    for (const chunk of chunks) {
-        const meta = chunkMetadataMap[chunk.hash];
-        if (!meta?.chunkLinks || meta.chunkLinks.length === 0) continue;
-
-        for (const link of meta.chunkLinks) {
-            const targetHash = parseInt(link.targetHash);
-
-            if (link.mode === 'force') {
-                // Force link: target MUST be included
-                hardLinkedHashes.add(targetHash);
-            } else if (link.mode === 'soft') {
-                // Soft link: accumulate boost for target
-                const currentBoost = softBoosts.get(targetHash) || 0;
-                softBoosts.set(targetHash, currentBoost + softBoost);
-            }
-        }
-    }
-
-    // Second pass: apply soft boosts to existing chunks
-    const processedChunks = chunks.map(chunk => {
-        const boost = softBoosts.get(chunk.hash) || 0;
-        if (boost > 0) {
-            return {
-                ...chunk,
-                score: Math.min(1.0, (chunk.score || 0) + boost),
-                softLinked: true,
-                linkBoost: boost
-            };
-        }
-        return chunk;
-    });
-
-    // Hard-linked chunks that aren't in results need to be fetched separately
-    // Return the hashes so caller can fetch them
-    const missingHardLinks = [...hardLinkedHashes].filter(h => !resultHashes.has(h));
-
-    return {
-        chunks: processedChunks,
-        hardLinkedHashes: hardLinkedHashes,
-        missingHardLinks: missingHardLinks
-    };
-}
+// Compatibility export for existing diagnostics and callers.
+export { processChunkLinks } from './related-chunk-expansion.js';
 
 /**
  * Evaluates a score threshold condition (per-chunk override)

@@ -23,3 +23,6 @@ The choice of non-chat chunks to include as generation context, based on collect
 
 **Collection query execution**:
 A search of specified vectorized collections that produces scored matches. Those matches are candidates for a caller's selection rules, rather than a decision about which chunks enter a prompt.
+
+**Related-chunk expansion**:
+The adjustment of retrieved context through chunk relationships: replacing summaries with parent content, boosting soft-linked chunks, and including forced-link targets.

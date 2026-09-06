@@ -26,7 +26,7 @@ import { isBackendAvailable } from '../backends/backend-manager.js';
 import { getCollectionRegistry, isCollectionEmpty } from './collection-loader.js';
 import { isCollectionEnabled, filterActiveCollections } from './collection-metadata.js';
 import { progressTracker } from '../ui/progress-tracker.js';
-import { buildSearchContext, filterChunksByConditions, processChunkLinks } from './conditional-activation.js';
+import { buildSearchContext, filterChunksByConditions } from './conditional-activation.js';
 import { getChunkMetadata, getCollectionMeta } from './collection-metadata.js';
 
 import { setLastSearchDebug } from '../ui/search-debug.js';
@@ -59,7 +59,7 @@ const chunkSelection = createChunkSelection({
     },
     queries: { queryCollection, getSavedHashes },
     rules: { extractChatKeywords, buildSearchContext, filterChunksByConditions,
-        processChunkLinks, parseRegistryKey, COLLECTION_PREFIXES, INTERNAL_COLLECTION_IDS },
+        parseRegistryKey, COLLECTION_PREFIXES, INTERNAL_COLLECTION_IDS },
 });
 
 // Compatibility export used by production diagnostics.

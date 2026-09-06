@@ -40,7 +40,7 @@ vi.mock('../ui/search-debug.js', async importOriginal => {
 });
 import { rearrangeChat } from '../core/chat-vectorization.js';
 import { createChunkSelection } from '../core/chunk-retrieval-selection.js';
-import { buildSearchContext, filterChunksByConditions, processChunkLinks } from '../core/conditional-activation.js';
+import { buildSearchContext, filterChunksByConditions } from '../core/conditional-activation.js';
 import { parseRegistryKey, COLLECTION_PREFIXES, INTERNAL_COLLECTION_IDS } from '../core/collection-ids.js';
 import { EXTENSION_PROMPT_TAG, RETRIEVAL_TIMEOUT_MS } from '../core/constants.js';
 
@@ -90,13 +90,91 @@ function makeSelection({ query, saved, rerank, empty = () => false, enabled = ()
         },
         rules: {
             extractChatKeywords: () => [{ text: 'dragon' }, { text: 'fire' }],
-            buildSearchContext, filterChunksByConditions, processChunkLinks,
+            buildSearchContext, filterChunksByConditions,
             parseRegistryKey, COLLECTION_PREFIXES, INTERNAL_COLLECTION_IDS,
         },
     });
 }
 
 const request = overrides => ({ chat: [{ mes: 'question' }], settings, generationType: 'normal', ...overrides });
+
+describe('Related-chunk compatibility through selection', () => {
+    it.each([false, true])('retains last-summary-wins identity, across collections: %s', async acrossCollections => {
+        state.registry = acrossCollections ? ['a', 'b'] : ['a'];
+        const summaries = [
+            { hash: 10, text: 'first summary', score: 0.9, isSummary: true, parentHash: 2 },
+            { hash: 11, text: 'last summary', score: 0.7, isSummary: true, parentHash: 2 },
+        ];
+        state.results.a = response(...(acrossCollections ? summaries.slice(0, 1) : summaries));
+        state.results.b = response(summaries[1]);
+        const saved = vi.fn(async id => response({ hash: 2, text: `parent from ${id}` }));
+        const result = await makeSelection({ saved }).select(request());
+        expect(result.chunks).toHaveLength(1);
+        expect(result.chunks[0]).toMatchObject({ hash: '2', score: 0.7,
+            text: `parent from ${acrossCollections ? 'b' : 'a'}`, metadata: { originalSummaryHash: 11 } });
+        expect(saved).toHaveBeenCalledTimes(1);
+    });
+
+    it('retains an already-retrieved parent alongside its string-hash expansion', async () => {
+        state.registry = ['a'];
+        state.results.a = response(
+            { hash: 1, text: 'summary', score: 0.9, isSummary: true, parentHash: 2 },
+            { hash: 2, text: 'parent', score: 0.8 },
+        );
+        const result = await makeSelection({ saved: async () => response({ hash: 2, text: 'parent' }) }).select(request());
+        expect(result.chunks.map(c => c.hash)).toEqual([2, '2']);
+    });
+
+    it.each(['missing', 'unavailable', 'failed'])('retains summaries and omits force targets when storage is %s', async mode => {
+        state.registry = ['a'];
+        state.results.a = response(
+            { hash: 1, text: 'summary', score: 0.9, isSummary: true, parentHash: 2 },
+            { hash: 3, text: 'source', score: 0.8, chunkLinks: [{ targetHash: '4', mode: 'force' }] },
+        );
+        const saved = vi.fn(async () => {
+            if (mode === 'failed') throw new Error('storage failed');
+            return mode === 'missing' ? response() : [1, 3];
+        });
+        const result = await makeSelection({ saved }).select(request());
+        expect(result.chunks.map(c => c.hash)).toEqual([3, 1]);
+        expect(result.chunks[1].text).toBe('summary');
+        expect(saved).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not follow fetched targets recursively and still deduplicates them against chat', async () => {
+        state.registry = ['a'];
+        state.results.a = response({ hash: 1, text: 'source', score: 0.9, chunkLinks: [{ targetHash: '99', mode: 'force' }] });
+        const saved = vi.fn(async () => response(
+            { hash: 99, text: 'duplicate', chunkLinks: [{ targetHash: '3', mode: 'force' }] },
+            { hash: 3, text: 'next link' },
+        ));
+        const result = await makeSelection({ saved }).select(request({ chat: [{ mes: 'duplicate' }] }));
+        expect(result.chunks.map(c => c.hash)).toEqual([1]);
+        expect(result.skippedDuplicates.map(c => c.hash)).toEqual([99]);
+        expect(saved).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([2, '2'])('preserves numeric versus string soft-link targets: %s', async hash => {
+        state.registry = ['a'];
+        state.results.a = response(
+            { hash: 1, text: 'source', score: 0.9, chunkLinks: [{ targetHash: '2', mode: 'soft' }] },
+            { hash, text: 'target', score: 0.6 },
+        );
+        const result = await makeSelection().select(request());
+        expect(result.chunks[1].score).toBe(typeof hash === 'number' ? 0.75 : 0.6);
+    });
+
+    it('uses the last source collection when two collections force the same hash', async () => {
+        state.registry = ['a', 'b'];
+        state.results.a = response({ hash: 1, text: 'a', score: 0.9, chunkLinks: [{ targetHash: '3', mode: 'force' }] });
+        state.results.b = response({ hash: 2, text: 'b', score: 0.8, chunkLinks: [{ targetHash: '3', mode: 'force' }] });
+        const saved = vi.fn(async id => response({ hash: 3, text: id }));
+        const result = await makeSelection({ saved }).select(request());
+        expect(saved).toHaveBeenCalledTimes(1);
+        expect(saved).toHaveBeenCalledWith('b', settings, true);
+        expect(result.chunks[2]).toMatchObject({ hash: 3, text: 'b', collectionId: 'b', score: 1 });
+    });
+});
 
 describe('Chunk retrieval selection interface', () => {
     it.each([
