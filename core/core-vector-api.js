@@ -22,6 +22,8 @@
  * ============================================================================
  */
 
+import { bindCollectionQueries } from './collection-query-bindings.js';
+
 import { getRequestHeaders } from '../../../../../script.js';
 import { modules } from '../../../../extensions.js';
 import { secret_state } from '../../../../secrets.js';
@@ -34,8 +36,8 @@ import { textgen_types, textgenerationwebui_settings } from '../../../../textgen
 import '../../../../openai.js';
 import { isWebLlmSupported } from '../../../shared.js';
 import { getWebLlmProvider } from '../providers/webllm.js';
-import { getBackend, getBackendForCollection, invalidateBackendHealth, recordQuery, recordInsert, recordDelete, recordError } from '../backends/backend-manager.js';
-import { resolveBackendForCollection, getRegistryBackend } from './collection-ids.js';
+import { getBackend, getBackendForCollection, invalidateBackendHealth, recordInsert, recordDelete, recordError } from '../backends/backend-manager.js';
+import { getRegistryBackend } from './collection-ids.js';
 import {
     getProviderConfig,
     getModelField,
@@ -44,10 +46,6 @@ import {
     requiresApiKey,
     requiresUrl
 } from './providers.js';
-import { getOverfetchAmount } from './keyword-boost.js';
-import { applyBM25Scoring, porterStemmer } from './bm25-scorer.js';
-import { hybridSearch } from './hybrid-search.js';
-import { extractQueryKeywords, RETRIEVAL_KEYWORD_LEVELS, isCJKToken } from './query-keyword-extractor.js';
 import { log } from './log.js';
 
 /**
@@ -932,321 +930,6 @@ export async function deleteVectorItems(collectionId, hashes, settings) {
 }
 
 /**
- * Queries a single collection for similar vectors
- * Applies keyword boost system: overfetch → boost → trim
- * For client-side embedding sources (webllm, koboldcpp, bananabread), generates query embedding first.
- * @param {string} collectionId - The collection to query
- * @param {string} searchText - The text to query
- * @param {number} topK - The number of results to return
- * @param {object} settings VectFox settings object
- * @returns {Promise<{ hashes: number[], metadata: object[]}>} - Hashes and metadata of the results
- */
-export async function queryCollection(collectionId, searchText, topK, settings, filters = {}) {
-    // Canonical routing (Doc/collection_helper.md): resolveBackendForCollection accepts either form
-    //   (registry-key "backend:id" or bare ID) and returns the backend label
-    //   plus the BARE collectionId for downstream calls. Falls back to
-    //   getBackend(settings) only when BOTH resolution paths fail, which
-    //   should never happen for a well-formed VectFox collection ID.
-    const resolved = resolveBackendForCollection(collectionId);
-    const bareCollectionId = resolved.collectionId;
-    const backend = resolved.backend
-        ? await getBackendForCollection(resolved.backend, settings)
-        : await getBackend(settings);
-
-    // Sources that require client-side embedding generation
-    const clientSideEmbeddingSources = ['webllm', 'koboldcpp', 'bananabread'];
-    let queryVector = null;
-
-    // If source requires client-side embeddings, generate query vector
-    if (clientSideEmbeddingSources.includes(settings.source)) {
-        const queryItem = [searchText];
-        try {
-            const additionalArgs = await getAdditionalArgs(queryItem, settings);
-            // additionalArgs.embeddings is a Record<string, number[]> where keys are original text
-            if (additionalArgs.embeddings && additionalArgs.embeddings[searchText]) {
-                queryVector = additionalArgs.embeddings[searchText];
-                log.verbose(`[EventBase] Embedding model (${settings.source}) returned vector: dim=${queryVector.length}, first5=[${queryVector.slice(0, 5).map(v => v.toFixed(4)).join(', ')}], last5=[${queryVector.slice(-5).map(v => v.toFixed(4)).join(', ')}], model=${additionalArgs.model || 'n/a'}`);
-            } else {
-                // VEC-35: Fallback to server-side embedding instead of failing completely
-                log.warn(`[VectFox] Client-side embedding generation returned empty result for ${settings.source}, falling back to server-side embedding`);
-            }
-        } catch (clientEmbedError) {
-            // VEC-35: Fallback to server-side embedding when client-side fails
-            log.warn(`[VectFox] Client-side embedding failed for ${settings.source}: ${clientEmbedError.message}. Falling back to server-side embedding.`);
-        }
-    }
-
-    // Append concepts_any terms to the query text so BM25 naturally boosts events containing
-    // those theme words — without hard-filtering anything out. Dense vector stays clean for
-    // client-side embedding paths because queryVector is already captured above.
-    let effectiveQuery = searchText;
-    if (Array.isArray(filters.concepts_any) && filters.concepts_any.length > 0) {
-        effectiveQuery = `${searchText} ${filters.concepts_any.join(' ')}`;
-        if (log.enabled('lifecycle')) {
-            log.verbose(`[VectFox] concepts_any appended to query text: [${filters.concepts_any.join(', ')}]`);
-        }
-    }
-
-    // Three-case routing:
-    //   A3 — server-side hybrid (Qdrant with prefer_native ON) — dense vector search +
-    //         full-corpus payload/text keyword matching via Qdrant scroll, fused in plugin code
-    //         (NOT Qdrant native dense+sparse-vector hybrid; no sparse vectors stored)
-    //   A2 — client-side hybrid over ANN candidates (standard backend, method = 'hybrid')
-    //   A1 — BM25 re-rank of ANN top-K (standard backend default, method = 'bm25')
-    const nativeHybridAvailable = backend?.supportsHybridSearch?.() === true;
-    const preferNative = settings.hybrid_native_prefer !== false;
-    const useHybridPath = (nativeHybridAvailable && preferNative) || settings.keyword_scoring_method === 'hybrid';
-
-    if (useHybridPath) {
-        if (log.enabled('lifecycle')) {
-            const reason = nativeHybridAvailable && preferNative ? 'native' : 'client-side';
-            log.verbose(`[VectFox] Hybrid search (${reason}), dispatching to hybrid search module`);
-        }
-        const queryStart = Date.now();
-        try {
-            const result = await hybridSearch(bareCollectionId, effectiveQuery, topK, settings, { queryVector, filters });
-            const queryLatency = Date.now() - queryStart;
-            recordQuery(resolved.backend || settings?.vector_backend || 'standard', queryLatency);
-            if (log.enabled('lifecycle')) {
-                const scores = (result.metadata || []).map(m => (m.score ?? 0).toFixed(4));
-                const fusionMethod = (settings.hybrid_fusion_method || 'rrf').toUpperCase();
-                log.verbose(`[VectFox] Hybrid search (${fusionMethod}) response: ${result.hashes?.length ?? 0} result(s) in ${queryLatency}ms, scores=[${scores.join(', ')}]`);
-            }
-            return result;
-        } catch (error) {
-            recordError(resolved.backend || settings?.vector_backend || 'standard', error);
-            throw error;
-        }
-    }
-
-    // Standard vector search flow (A1/A2). Filters are not supported here.
-    if (Object.keys(filters).length > 0 && log.enabled('lifecycle')) {
-        log.warn('[VectFox] queryCollection: filters ignored on A1/A2 Standard backend path');
-    }
-    // Overfetch to allow keyword-boosted chunks to surface
-    const overfetchAmount = getOverfetchAmount(topK);
-    // VEC-18: Track query latency for health dashboard
-    const queryStart = Date.now();
-    let rawResults;
-    // Backend name for metrics — resolved backend wins, fall back to settings.
-    const actualBackendName = resolved.backend || settings?.vector_backend || 'standard';
-    try {
-        rawResults = await backend.queryCollection(bareCollectionId, effectiveQuery, overfetchAmount, settings, queryVector);
-        const queryLatency = Date.now() - queryStart;
-        recordQuery(actualBackendName, queryLatency);
-        if (log.enabled('lifecycle')) {
-            const scores = (rawResults.metadata || []).map(m => (m.score ?? 0).toFixed(4));
-            log.verbose(`[EventBase] Embedding search response: ${rawResults.hashes?.length ?? 0} result(s) in ${queryLatency}ms, scores=[${scores.join(', ')}]`);
-        }
-    } catch (error) {
-        // VEC-18: Record query error
-        recordError(actualBackendName, error);
-        throw error;
-    }
-
-    // Convert to format expected by keyword boost
-    const resultsForBoost = rawResults.metadata.map((meta, idx) => ({
-        hash: rawResults.hashes[idx],
-        score: meta.score || 0,
-        metadata: meta,
-        text: meta.text || ''
-    }));
-
-    let finalResults = await scoreResults(resultsForBoost, effectiveQuery, topK, settings, bareCollectionId);
-
-    if (log.enabled('trace')) {
-        const idfMode = settings.bm25_use_corpus_idf ? 'corpus-IDF' : 'local-IDF';
-        finalResults.forEach((r, i) => {
-            log.trace(`[VectFox] #${i + 1} final=${r.score?.toFixed(4)} vector=${r.vectorScore?.toFixed(4) ?? 'n/a'} bm25=${r.bm25Score?.toFixed(4) ?? 'n/a'} (A1 BM25 re-rank, ${idfMode})`);
-        });
-    }
-
-    // Convert back to expected format
-    return {
-        hashes: finalResults.map(r => r.hash),
-        metadata: finalResults.map(r => ({
-            ...r.metadata,
-            score: r.score,
-            originalScore: r.originalScore || r.vectorScore,
-            keywordBoost: r.keywordBoost,
-            bm25Score: r.bm25Score,
-            normalizedBM25: r.normalizedBM25,
-            vectorScore: r.vectorScore,
-            matchedKeywords: r.matchedKeywords,
-            matchedKeywordsWithWeights: r.matchedKeywordsWithWeights,
-            keywordBoosted: r.keywordBoosted
-        }))
-    };
-}
-
-async function scoreResults(resultsForBoost, searchText, topK, settings, collectionId = null) {
-    // Short-circuit: nothing to re-rank means no need to extract keywords or run BM25.
-    if (!resultsForBoost || resultsForBoost.length === 0) {
-        return [];
-    }
-
-    // A1 — BM25 re-rank over ANN top-K candidates only (no full corpus scan)
-    const level = settings?.hybrid_keyword_level || 'balance';
-    const maxKeywords = RETRIEVAL_KEYWORD_LEVELS[level]?.maxKeywords ?? 50;
-    const rawKeywords = extractQueryKeywords(searchText, maxKeywords, settings?.cjk_tokenizer_mode);
-    const queryTokens = rawKeywords.map(token => isCJKToken(token) ? token : porterStemmer(token));
-
-    // Optional: full-corpus IDF (A/B toggle in Core → Hybrid Search & BM25).
-    // Fetches and tokenizes every chunk of the collection on first use, then
-    // caches in-memory for the session.
-    //
-    // Hardening: this is an *enhancement* on top of valid vector results. Any
-    // failure — module load error, network blip, plugin 5xx, tokenizer crash —
-    // must NOT discard the ANN results. We catch every failure mode, log it
-    // clearly, and continue with corpusStats=null (= local-IDF BM25, the
-    // pre-toggle default). Without this, a single ./corpus-stats.js import
-    // error bubbles up through scoreResults → queryCollection →
-    // eventbase-retrieval.js:400 catch, which discards every match.
-    let corpusStats = null;
-    if (settings?.bm25_use_corpus_idf === true && collectionId) {
-        try {
-            const mod = await import('./corpus-stats.js');
-            corpusStats = await mod.getCorpusStats(collectionId, settings);
-            if (!corpusStats && log.enabled('lifecycle')) {
-                log.warn(`[VectFox] Corpus-IDF disabled for ${collectionId}: getCorpusStats returned null (plugin unavailable or /chunks/list failed). Falling back to local-IDF BM25.`);
-            }
-        } catch (err) {
-            log.warn(`[VectFox] Corpus-IDF unavailable for ${collectionId}, falling back to local-IDF BM25. Reason: ${err?.message || err}`);
-            corpusStats = null;
-        }
-    }
-
-    const bm25Results = applyBM25Scoring(resultsForBoost, searchText, {
-        k1: settings.bm25_k1 || 1.5,
-        b: settings.bm25_b || 0.75,
-        alpha: 0.5,
-        beta: 0.5,
-        queryTokens,
-        corpusStats,
-    });
-    return bm25Results.slice(0, topK);
-}
-
-/**
- * Queries multiple collections for a given text.
- * For client-side embedding sources, generates query embedding once and reuses for all collections.
- * @param {string[]} collectionIds - Collection IDs to query
- * @param {string} searchText - Text to query
- * @param {number} topK - Number of results to return
- * @param {number} threshold - Score threshold
- * @param {object} settings VectFox settings object
- * @returns {Promise<Record<string, { hashes: number[], metadata: object[] }>>} - Results mapped to collection IDs
- */
-export async function queryMultipleCollections(collectionIds, searchText, topK, threshold, settings) {
-    const backend = await getBackend(settings);
-
-    // Sources that require client-side embedding generation
-    const clientSideEmbeddingSources = ['webllm', 'koboldcpp', 'bananabread'];
-    let queryVector = null;
-
-    // Generate query vector once for all collections (efficiency)
-    if (clientSideEmbeddingSources.includes(settings.source)) {
-        try {
-            // getAdditionalArgs expects string[], not objects
-            const additionalArgs = await getAdditionalArgs([searchText], settings);
-            // additionalArgs.embeddings is a Record<string, number[]> where keys are original text
-            if (additionalArgs.embeddings && additionalArgs.embeddings[searchText]) {
-                queryVector = additionalArgs.embeddings[searchText];
-            } else {
-                // VEC-35: Fallback to server-side embedding instead of failing completely
-                log.warn(`[VectFox] Client-side embedding generation returned empty result for ${settings.source}, falling back to server-side embedding`);
-            }
-        } catch (clientEmbedError) {
-            // VEC-35: Fallback to server-side embedding when client-side fails
-            log.warn(`[VectFox] Client-side embedding failed for ${settings.source}: ${clientEmbedError.message}. Falling back to server-side embedding.`);
-        }
-    }
-
-    // Three-case routing (mirrors queryCollection):
-    //   A3/A2 — native or client-side hybrid per collection
-    //   A1    — BM25 re-rank after bulk ANN (below)
-    const nativeHybridAvailable = backend?.supportsHybridSearch?.() === true;
-    const preferNative = settings.hybrid_native_prefer !== false;
-    const useHybridPath = (nativeHybridAvailable && preferNative) || settings.keyword_scoring_method === 'hybrid';
-
-    if (useHybridPath) {
-        if (log.enabled('lifecycle')) {
-            const reason = nativeHybridAvailable && preferNative ? 'native' : 'client-side';
-            log.verbose(`[VectFox] Hybrid search (${reason}) for multi-collection query`);
-        }
-        const processedResults = {};
-        for (const collectionId of collectionIds) {
-            try {
-                const queryStart = Date.now();
-                processedResults[collectionId] = await hybridSearch(collectionId, searchText, topK, settings, { queryVector });
-                const queryLatency = Date.now() - queryStart;
-                recordQuery(settings?.vector_backend || 'standard', queryLatency);
-            } catch (error) {
-                log.warn(`[VectFox] Hybrid search failed for ${collectionId}:`, error.message);
-                recordError(settings?.vector_backend || 'standard', error);
-                processedResults[collectionId] = { hashes: [], metadata: [] };
-            }
-        }
-        return processedResults;
-    }
-
-    // Standard vector search flow
-    // Get raw results from backend (with overfetch for each collection)
-    const overfetchAmount = getOverfetchAmount(topK);
-    // VEC-18: Track query latency for health dashboard
-    const queryStart = Date.now();
-    let rawResults;
-    try {
-        rawResults = await backend.queryMultipleCollections(collectionIds, searchText, overfetchAmount, threshold, settings, queryVector);
-        const queryLatency = Date.now() - queryStart;
-        recordQuery(settings?.vector_backend || 'standard', queryLatency);
-    } catch (error) {
-        // VEC-18: Record query error
-        recordError(settings?.vector_backend || 'standard', error);
-        throw error;
-    }
-
-    // Apply scoring to each collection's results
-    const processedResults = {};
-
-    for (const [collectionId, collectionResults] of Object.entries(rawResults)) {
-        if (!collectionResults || !collectionResults.metadata) {
-            processedResults[collectionId] = collectionResults;
-            continue;
-        }
-
-        // Convert to format expected by scoring functions
-        const resultsForBoost = collectionResults.metadata.map((meta, idx) => ({
-            hash: collectionResults.hashes[idx],
-            score: meta.score || 0,
-            metadata: meta,
-            text: meta.text || ''
-        }));
-
-        let finalResults = await scoreResults(resultsForBoost, searchText, topK, settings, collectionId);
-
-        // Convert back to expected format
-        processedResults[collectionId] = {
-            hashes: finalResults.map(r => r.hash),
-            metadata: finalResults.map(r => ({
-                ...r.metadata,
-                score: r.score,
-                originalScore: r.originalScore || r.vectorScore,
-                keywordBoost: r.keywordBoost,
-                bm25Score: r.bm25Score,
-                normalizedBM25: r.normalizedBM25,
-                vectorScore: r.vectorScore,
-                matchedKeywords: r.matchedKeywords,
-                matchedKeywordsWithWeights: r.matchedKeywordsWithWeights,
-                keywordBoosted: r.keywordBoosted
-            }))
-        };
-    }
-
-    return processedResults;
-}
-
-/**
  * Queries multiple collections with conditional activation filtering.
  * Collections that don't meet their activation conditions are skipped.
  *
@@ -1382,4 +1065,14 @@ export async function updateChunkMetadata(collectionId, hash, metadata, settings
     const result = await backend.updateChunkMetadata(collectionId, hash, metadata, settings);
     _invalidateSavedHashesMetaCache(collectionId, `update chunk metadata (hash ${hash})`);
     return result;
+}
+
+// Compatibility entry points for existing callers.
+const collectionQueries = bindCollectionQueries(getAdditionalArgs);
+export async function queryCollection(collectionId, searchText, topK, settings, filters = {}) {
+    return collectionQueries.queryCollection(collectionId, searchText, topK, settings, filters);
+}
+
+export async function queryMultipleCollections(collectionIds, searchText, topK, threshold, settings) {
+    return collectionQueries.queryMultipleCollections(collectionIds, searchText, topK, threshold, settings);
 }

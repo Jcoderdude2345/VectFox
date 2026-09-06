@@ -164,18 +164,6 @@ describe('Live code remains intact (regression guard)', () => {
                 .toMatch(/export\s+(?:async\s+)?function\s+rearrangeChat/);
         });
 
-        it('Stage 8 conditions stage is still wired into the pipeline', () => {
-            const src = readRel('core/chat-vectorization.js');
-            // applyConditionsStage is the wrapper called from rearrangeChat
-            expect(src).toMatch(/applyConditionsStage\s*\(/);
-            expect(src).toMatch(/applyChunkConditions/);
-        });
-
-        it('Stage 8.5 chunk groups and links stage is still wired', () => {
-            expect(readRel('core/chat-vectorization.js'))
-                .toMatch(/applyGroupsAndLinksStage\s*\(/);
-        });
-
         it('Keyword extraction is still wired for non-chat content', () => {
             // extractTextKeywords is what lorebook/document/character ingestion calls
             expect(readRel('core/content-vectorization.js'))

@@ -10,7 +10,8 @@
  * Fix (B): chat-vectorization.js stage 4.3 falls back to getChunkMetadata when
  *          chunk.metadata.keywords is empty (no-plugin query result).
  *
- * These tests verify both the storage contract (A) and the fallback behaviour (B).
+ * Storage contract coverage lives here. Retrieval behavior is exercised through
+ * the real selection interface in chunk-selection.test.js.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -37,43 +38,6 @@ import { saveChunkMetadata, getChunkMetadata, deleteChunkMetadata } from '../cor
 
 function makeKeywords(...words) {
     return words.map((text, i) => ({ text, weight: 1.0 + i * 0.1 }));
-}
-
-/** Simulates the keyword resolution logic added to chat-vectorization.js stage 4.3 */
-function resolveChunkKeywords(chunk) {
-    const rawKeywords = chunk.metadata?.keywords?.length > 0
-        ? chunk.metadata.keywords
-        : (getChunkMetadata(String(chunk.hash))?.keywords || []);
-    return rawKeywords
-        .map(kw => (typeof kw === 'object' ? kw.text : kw)?.toLowerCase())
-        .filter(Boolean);
-}
-
-/**
- * Mirrors applyQueryKeywordBoost's behavior (core/chat-vectorization.js,
- * rearrangeChat's STAGE 4.3) — same binary "any keyword match → perfect
- * score" boost, built on the same resolveChunkKeywords fallback tested
- * above. chat-vectorization.js can't be imported directly here: it pulls in
- * core-vector-api.js's full SillyTavern host chain (down to secrets.js),
- * which is impractical to mock in a unit test. The real function also gets
- * an end-to-end check via diagnostics/production-tests.js's
- * '[PROD] Keyword Boosting' self-test — keep both in sync if STAGE 4.3 changes.
- */
-function boostChunksByQueryKeywords(chunks, queryKeywordTexts) {
-    let boostedCount = 0;
-    for (const chunk of chunks) {
-        const chunkKeywords = resolveChunkKeywords(chunk);
-        const matchedKeywords = queryKeywordTexts.filter(qk => chunkKeywords.includes(qk));
-        if (matchedKeywords.length > 0) {
-            const oldScore = chunk.score;
-            chunk.keywordMatched = true;
-            chunk.matchedQueryKeywords = matchedKeywords;
-            chunk.score = 1.0;
-            chunk.originalScore = oldScore;
-            boostedCount++;
-        }
-    }
-    return boostedCount;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,125 +85,5 @@ describe('saveChunkMetadata / getChunkMetadata — keyword round-trip', () => {
 
         deleteChunkMetadata(hash);
         expect(getChunkMetadata(hash)).toBeNull();
-    });
-});
-
-// ---------------------------------------------------------------------------
-// Keyword fallback during retrieval (Fix B)
-// ---------------------------------------------------------------------------
-
-describe('resolveChunkKeywords — no-plugin fallback', () => {
-    beforeEach(() => {
-        mockSettings.vectfox = {};
-    });
-
-    it('returns keywords from chunk.metadata when present (plugin path)', () => {
-        const chunk = {
-            hash: 999,
-            metadata: { keywords: makeKeywords('wizard', 'spell') },
-        };
-
-        const result = resolveChunkKeywords(chunk);
-        expect(result).toEqual(['wizard', 'spell']);
-    });
-
-    it('falls back to getChunkMetadata when chunk.metadata.keywords is empty (no-plugin path)', () => {
-        const hash = '777';
-        saveChunkMetadata(hash, { keywords: makeKeywords('quest', 'hero') });
-
-        const chunk = {
-            hash,
-            metadata: { keywords: [] },   // native ST query returns empty
-        };
-
-        const result = resolveChunkKeywords(chunk);
-        expect(result).toEqual(['quest', 'hero']);
-    });
-
-    it('falls back when chunk.metadata.keywords is missing entirely', () => {
-        const hash = '888';
-        saveChunkMetadata(hash, { keywords: makeKeywords('dungeon') });
-
-        const chunk = { hash, metadata: {} };
-
-        const result = resolveChunkKeywords(chunk);
-        expect(result).toEqual(['dungeon']);
-    });
-
-    it('returns empty array when both sources are empty', () => {
-        const chunk = { hash: '000', metadata: {} };
-        expect(resolveChunkKeywords(chunk)).toEqual([]);
-    });
-
-    it('normalises keywords to lowercase for case-insensitive matching', () => {
-        const hash = '555';
-        saveChunkMetadata(hash, { keywords: makeKeywords('Dragon', 'FIRE') });
-
-        const chunk = { hash, metadata: {} };
-        const result = resolveChunkKeywords(chunk);
-        expect(result).toEqual(['dragon', 'fire']);
-    });
-
-    it('plugin metadata takes priority over saved metadata when both exist', () => {
-        const hash = '444';
-        saveChunkMetadata(hash, { keywords: makeKeywords('saved-keyword') });
-
-        const chunk = {
-            hash,
-            metadata: { keywords: makeKeywords('plugin-keyword') },
-        };
-
-        const result = resolveChunkKeywords(chunk);
-        // Plugin metadata wins — this is intentional (server-side is authoritative)
-        expect(result).toEqual(['plugin-keyword']);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// STAGE 4.3 binary keyword boost (applyQueryKeywordBoost)
-// ---------------------------------------------------------------------------
-
-describe('boostChunksByQueryKeywords — STAGE 4.3 binary boost', () => {
-    beforeEach(() => {
-        mockSettings.vectfox = {};
-    });
-
-    it('boosts a chunk with a matching keyword to a perfect score', () => {
-        const chunk = { hash: 'a1', score: 0.6, metadata: { keywords: makeKeywords('dragon', 'fire') } };
-        const boostedCount = boostChunksByQueryKeywords([chunk], ['dragon']);
-
-        expect(boostedCount).toBe(1);
-        expect(chunk.keywordMatched).toBe(true);
-        expect(chunk.score).toBe(1.0);
-        expect(chunk.originalScore).toBe(0.6);
-        expect(chunk.matchedQueryKeywords).toEqual(['dragon']);
-    });
-
-    it('leaves chunks without a matching keyword untouched', () => {
-        const chunk = { hash: 'a2', score: 0.5, metadata: { keywords: makeKeywords('sword') } };
-        const boostedCount = boostChunksByQueryKeywords([chunk], ['dragon']);
-
-        expect(boostedCount).toBe(0);
-        expect(chunk.keywordMatched).toBeUndefined();
-        expect(chunk.score).toBe(0.5);
-    });
-
-    it('uses the no-plugin getChunkMetadata fallback for keyword resolution', () => {
-        const hash = 'fallback-1';
-        saveChunkMetadata(hash, { keywords: makeKeywords('quest') });
-        const chunk = { hash, score: 0.4, metadata: {} };
-
-        const boostedCount = boostChunksByQueryKeywords([chunk], ['quest']);
-
-        expect(boostedCount).toBe(1);
-        expect(chunk.score).toBe(1.0);
-    });
-
-    it('tracks all matched keywords when multiple match', () => {
-        const chunk = { hash: 'a3', score: 0.3, metadata: { keywords: makeKeywords('wizard', 'spell') } };
-        const boostedCount = boostChunksByQueryKeywords([chunk], ['wizard', 'spell']);
-
-        expect(boostedCount).toBe(1);
-        expect(chunk.matchedQueryKeywords).toEqual(['wizard', 'spell']);
     });
 });

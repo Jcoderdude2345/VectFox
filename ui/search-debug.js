@@ -14,6 +14,9 @@
  * ============================================================================
  */
 
+import { createDebugData, addTrace, recordChunkFate } from '../core/retrieval-diagnostics.js';
+export { createDebugData, addTrace, recordChunkFate };
+
 import StringUtils from '../utils/string-utils.js';
 
 // ============================================================================
@@ -41,99 +44,6 @@ const MAX_QUERY_HISTORY = 13;
  * @property {Array} stages.injected - Chunks that were actually injected
  * @property {Object} stats - Summary statistics
  */
-
-/**
- * Creates empty debug data structure with full tracing support
- * @returns {SearchDebugData}
- */
-export function createDebugData() {
-    return {
-        query: '',
-        timestamp: Date.now(),
-        collectionId: null,
-        // Which pipeline produced this entry — 'chunkbase' (chat-vectorization.js:
-        // ChunkBase documents/lorebooks/URLs + EventBase) or 'lorebook-wi'
-        // (world-info-integration.js: semantic Lorebook World Info). Both write
-        // into this same shared history; callers that want to distinguish them
-        // read this field rather than guessing from shape.
-        source: 'chunkbase',
-        settings: {},
-        stages: {
-            initial: [],
-            afterThreshold: [],
-            afterConditions: [],
-            injected: []
-        },
-        // Detailed trace log - every operation recorded
-        trace: [],
-        // Per-chunk tracking - what happened to each chunk
-        chunkFates: {},
-        stats: {
-            totalInCollection: 0,
-            retrievedFromVector: 0,
-            passedThreshold: 0,
-            afterConditions: 0,
-            actuallyInjected: 0,
-            skippedDuplicates: 0,
-            tokensBudget: 0,
-            tokensUsed: 0
-        }
-    };
-}
-
-/**
- * Adds a trace entry to debug data
- * @param {SearchDebugData} debugData
- * @param {string} stage - Pipeline stage name
- * @param {string} action - What happened
- * @param {Object} details - Additional details
- */
-export function addTrace(debugData, stage, action, details = {}) {
-    if (!debugData.trace) debugData.trace = [];
-    debugData.trace.push({
-        time: Date.now(),
-        stage,
-        action,
-        ...details
-    });
-}
-
-/**
- * Records the fate of a specific chunk
- * @param {SearchDebugData} debugData
- * @param {string} hash - Chunk hash
- * @param {string} stage - Where it was dropped/passed
- * @param {string} fate - 'passed' | 'dropped'
- * @param {string} reason - Why it was dropped (if dropped)
- * @param {Object} data - Additional data (scores, etc)
- */
-export function recordChunkFate(debugData, hash, stage, fate, reason = null, data = {}) {
-    if (!debugData.chunkFates) debugData.chunkFates = {};
-    if (!debugData.chunkFates[hash]) {
-        debugData.chunkFates[hash] = {
-            hash,
-            stages: [],
-            finalFate: null,
-            finalReason: null
-        };
-    }
-
-    debugData.chunkFates[hash].stages.push({
-        stage,
-        fate,
-        reason,
-        ...data
-    });
-
-    // Update final fate if dropped
-    if (fate === 'dropped') {
-        debugData.chunkFates[hash].finalFate = 'dropped';
-        debugData.chunkFates[hash].finalReason = reason;
-        debugData.chunkFates[hash].droppedAt = stage;
-    } else if (fate === 'injected') {
-        debugData.chunkFates[hash].finalFate = 'injected';
-    }
-}
 
 /**
  * Stores debug data for the last search

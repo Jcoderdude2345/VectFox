@@ -17,3 +17,9 @@ Obtaining wiki titles or page content, including whether the content is saved in
 
 **Auto-Reformat run**:
 One attempt to turn a particular source into a reviewed, accepted set of entries. An unfinished or obsolete run is distinct from a previously accepted result.
+
+**Chunk retrieval selection**:
+The choice of non-chat chunks to include as generation context, based on collection eligibility, relevance, activation conditions, chunk relationships, and duplicate suppression.
+
+**Collection query execution**:
+A search of specified vectorized collections that produces scored matches. Those matches are candidates for a caller's selection rules, rather than a decision about which chunks enter a prompt.
